@@ -4,5 +4,5 @@
 # Do not ignore directories
 !*/
 
-# Keep the .gitignore itself
+# Whitelist
 !.gitignore
