@@ -16,22 +16,75 @@ Before starting, install:
 - A load-generation tool such as [`hey`](https://github.com/rakyll/hey) or
   ApacheBench (`ab`)
 
-You also need a Google Cloud project with billing enabled and both forms of CLI
-authentication used by this project:
+You also need a Google account that can create projects and link them to an
+open billing account. Authenticate both the `gcloud` CLI and Terraform:
 
 ```bash
 gcloud auth login
 gcloud auth application-default login
 ```
 
-The first command authenticates the `gcloud` CLI. The second supplies
-Application Default Credentials to Terraform's Google provider.
+Run every command below from the repository root.
 
-## Configure the project
+## Create and configure the project
 
 Set the project ID and region in `terraform/project.tfvars`. This is the only
 committed location for either value, so retargeting the deployment means
 changing each value on its single line there.
+
+Load those values into the current shell:
+
+```bash
+export PROJECT_ID=$(awk -F'"' '/^project_id/{print $2}' terraform/project.tfvars)
+export REGION=$(awk -F'"' '/^region/{print $2}' terraform/project.tfvars)
+```
+
+Create the project once. The display name and globally unique project ID both
+come from `PROJECT_ID`:
+
+```bash
+gcloud projects create "${PROJECT_ID}" --name="${PROJECT_ID}"
+```
+
+If the project already exists under your account, skip that command. If Google
+reports that the ID belongs to someone else, choose another globally unique ID
+in `terraform/project.tfvars`, reload the shell variables, and retry.
+
+List the open billing accounts available to your user:
+
+```bash
+gcloud billing accounts list --filter='open=true'
+```
+
+Copy the required account ID from the `ACCOUNT_ID` column, then link it to the
+new project:
+
+```bash
+export BILLING_ACCOUNT_ID="replace-with-account-id"
+gcloud billing projects link "${PROJECT_ID}" \
+  --billing-account="${BILLING_ACCOUNT_ID}"
+```
+
+Make the new project the default for interactive commands and for Application
+Default Credentials. Terraform receives its project explicitly, but aligning
+these defaults prevents quota warnings and accidental commands against another
+project:
+
+```bash
+gcloud config set project "${PROJECT_ID}"
+gcloud auth application-default set-quota-project "${PROJECT_ID}"
+```
+
+Confirm that the project is active and billing is enabled:
+
+```bash
+gcloud projects describe "${PROJECT_ID}" \
+  --format='value(projectId,lifecycleState)'
+gcloud billing projects describe "${PROJECT_ID}" \
+  --format='value(billingEnabled)'
+```
+
+Expected: the configured project ID followed by `ACTIVE`, then `True`.
 
 ## Pre-deployment check
 
