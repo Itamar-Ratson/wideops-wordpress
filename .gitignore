@@ -1,8 +1,33 @@
-# Ignore all files
+# Ignore everything, then whitelist the deliverable.
 *
-
-# Do not ignore directories
 !*/
 
-# Whitelist
+# Allow: files
 !.gitignore
+!README.md
+!Makefile
+!assignment.txt
+!data/wordpress.sql
+!.terraform.lock.hcl
+
+# Allow: directories
+!scripts/**
+
+# Allow: types
+!*.tf
+
+# Deny: files
+override.tf*
+*_override.tf*
+
+# Deny: directories
+**/.terraform/
+
+# Deny: types
+*.pem
+*.key
+*.crt
+*.csr
+
+# Supplied WordPress tree, unmodified. Last: outranks *.crt above.
+!app/**

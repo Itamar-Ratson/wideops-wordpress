@@ -1,0 +1,48 @@
+Hi Itamar,
+
+Following your interview at WideOps, we would like to invite you to complete a technical home assignment.
+
+This task is designed to simulate a real-world scenario you might encounter in this role. It will test your abilities in highly available architecture design, networking, and GCP best practices.
+
+The Scenario:
+Our team needs to deploy a highly available WordPress website. We have provided the basic WordPress files, but we need you to design and provision the infrastructure to support it in a production-ready, autoscaling environment.
+
+Your Mission:
+
+    Design an architecture that allows WordPress to run reliably across multiple instances simultaneously.
+    Provision a secure, highly available, and cost-optimized GCP environment.
+    Configure the application and infrastructure to ensure all components integrate seamlessly.
+
+
+Infrastructure Requirements:
+
+    Networking: A custom VPC with appropriate subnets and Firewall rules.
+    Compute: A Managed Instance Group (MIG) that scales automatically from 2 to 5 instances based on CPU utilization.
+    Database: A Cloud SQL primary instance configured with a Read Replica. (WordPress will connect to the primary instance).
+    Load Balancing: Expose the website to the internet using a GCP Global HTTP(S) Load Balancer. Use a self-signed certificate for HTTPS.
+
+
+Guidelines & Expectations:
+
+    Architecture & State: Ensure the application behaves consistently in an autoscaling, multi-server environment. Consider how stateful components - such as user-uploaded media and user session management are handled across multiple ephemeral servers.
+    Security & Best Practices: We expect a highly secure network design that protects backend infrastructure from direct public exposure. Apply general cloud security best practices like least-privilege IAM roles.
+    Cost Optimization: As this is a test environment, please use `e2-medium` instances for compute and shared-core instances for Cloud SQL.
+    Marketplace: Please avoid using GCP Marketplace pre-packaged solutions (e.g., Bitnami WordPress). We want to see how you build and configure this from scratch.
+
+
+Deliverables:
+Please provide a link to a private GitHub repository or Google Drive folder (and grant us access) containing:
+
+    Any deployment scripts (e.g., Bash, `gcloud` commands) or startup scripts you used to provision and configure the environment.
+    A comprehensive `README.md` file containing:
+
+    Detailed, step-by-step instructions on how you deployed your solution (so we can understand your process).
+    A brief explanation of your architectural choices regarding state/storage management, session management, networking, and security.
+
+
+Resources:
+
+    WordPress files: https://drive.google.com/drive/folders/1_dBKaPPX6q3bBehXNxX0B40CajDoPcD8
+    GCP Environment: Please use your own personal Google account utilizing the $300 GCP Free Tier credit (https://cloud.google.com/free).
+
+
