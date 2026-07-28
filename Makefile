@@ -1,4 +1,14 @@
-.PHONY: local-check local-clean
+.PHONY: bootstrap image local-check local-clean
+
+bootstrap:
+	terraform -chdir=terraform/bootstrap init
+	terraform -chdir=terraform/bootstrap apply
+
+image:
+	gcloud builds submit app/ \
+	  --project=wideops-wordpress \
+	  --region=europe-north2 \
+	  --tag europe-north2-docker.pkg.dev/wideops-wordpress/wordpress/wordpress:v1
 
 local-check: local-clean
 	docker compose up --build --wait
