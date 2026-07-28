@@ -1,8 +1,41 @@
-# Ignore all files
+# Ignore everything unless it is part of the deliverable.
 *
 
-# Do not ignore directories
+# Keep directories traversable so the whitelist below can admit their files.
 !*/
 
-# Whitelist
+# Deliverable whitelist
 !.gitignore
+!README.md
+!Makefile
+!assignment.txt
+!app/**
+!data/wordpress.sql
+!docs/**
+!scripts/**
+!terraform/**
+
+# Local and sensitive artifacts inside otherwise admitted directories
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.pem
+*.key
+*.crt
+*.csr
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# This CA bundle is part of the immutable supplied WordPress tree.
+!app/wp-includes/certificates/ca-bundle.crt
+
+# Supplied archive and working notes
+/site.tar.gz
+/gpt-design.txt
+/docs/points-to-return-to.txt
+/.claude/
