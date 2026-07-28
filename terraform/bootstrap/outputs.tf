@@ -1,6 +1,6 @@
 output "build_service_account" {
   description = "Service account used by Cloud Build in this project."
-  value       = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+  value       = local.build_service_account
 }
 
 output "project_number" {

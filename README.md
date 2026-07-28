@@ -28,15 +28,20 @@ Run every command below from the repository root.
 
 ## Create and configure the project
 
-Set the project ID and region in `terraform/project.tfvars`. This is the only
-committed location for either value, so retargeting the deployment means
-changing each value on its single line there.
+The project ID and region are declared as variable defaults in
+`terraform/bootstrap/variables.tf`. Terraform reads them from there with no
+flags, so retargeting the deployment starts by changing those two defaults.
 
-Load those values into the current shell:
+The region is assumed to offer `e2-medium`, the shared-core `db-g1-small`
+database tier, and Artifact Registry. If you change it, confirm all three before
+deploying.
+
+The project-creation steps below run before Terraform does, so set the same two
+values in your shell for them:
 
 ```bash
-export PROJECT_ID=$(awk -F'"' '/^project_id/{print $2}' terraform/project.tfvars)
-export REGION=$(awk -F'"' '/^region/{print $2}' terraform/project.tfvars)
+export PROJECT_ID=wideops-wordpress
+export REGION=europe-north2
 ```
 
 Create the project once. The display name and globally unique project ID both
@@ -47,8 +52,9 @@ gcloud projects create "${PROJECT_ID}" --name="${PROJECT_ID}"
 ```
 
 If the project already exists under your account, skip that command. If Google
-reports that the ID belongs to someone else, choose another globally unique ID
-in `terraform/project.tfvars`, reload the shell variables, and retry.
+reports that the ID belongs to someone else, choose another globally unique ID,
+update it in `terraform/bootstrap/variables.tf` and in the `image` target of the
+`Makefile`, re-export `PROJECT_ID`, and retry.
 
 List the open billing accounts available to your user:
 
@@ -128,17 +134,20 @@ The deployment starts with these two steps. Neither uses a floating image tag.
 make bootstrap
 ```
 
-Allow about 3-5 minutes in a fresh project. The target first enables the APIs
-declared by the bootstrap stack. It then queries the GCP APIs to prove that the
-chosen region offers `e2-medium`, the shared-core `db-g1-small` database tier,
-and an Artifact Registry location. Terraform cannot create the repository or
-its IAM bindings unless all three checks pass. It then creates the regional
-Docker repository and grants the build identity permission to push images and
-write build logs.
+Allow about 3-5 minutes in a fresh project. The target enables the APIs declared
+by the bootstrap stack, creates the regional Docker repository, and grants the
+build identity permission to push images and write build logs.
 
-The target finishes by describing the repository. Check that it reports a
-repository path followed by `DOCKER`. Destroying the bootstrap stack does not
-disable project APIs.
+Confirm that the repository exists and is a Docker repository:
+
+```bash
+gcloud artifacts repositories describe wordpress \
+  --project="${PROJECT_ID}" --location="${REGION}" \
+  --format='value(name,format)'
+```
+
+Expected: a repository path followed by `DOCKER`. Destroying the bootstrap stack
+does not disable project APIs.
 
 ### 2. Build and publish the application image
 
@@ -149,9 +158,15 @@ make image
 Allow about 5-10 minutes for the first managed build. Cloud Build builds the
 existing `app/Dockerfile` and pushes the result as
 `${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress/wordpress:v1`. The `v1`
-tag is specific and intentionally does not float. The target finishes by
-listing the matching repository entry; check that its `TAGS` column contains
-`v1`.
+tag is specific and intentionally does not float.
 
-The managed build path was exercised successfully, so `make image` records the
-path actually used rather than the local Docker fallback.
+Confirm that the image was published:
+
+```bash
+gcloud artifacts docker images list \
+  "${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress" \
+  --project="${PROJECT_ID}" --include-tags --filter='tags:v1' \
+  --format='table(package,tags,createTime)'
+```
+
+Expected: one row whose `TAGS` column contains `v1`.
