@@ -27,6 +27,12 @@ gcloud auth application-default login
 The first command authenticates the `gcloud` CLI. The second supplies
 Application Default Credentials to Terraform's Google provider.
 
+## Configure the project
+
+Set the project ID and region in `terraform/project.tfvars`. This is the only
+committed location for either value, so retargeting the deployment means
+changing each value on its single line there.
+
 ## Pre-deployment check
 
 Before creating cloud infrastructure, build and run the real migrated site
@@ -58,3 +64,41 @@ and what each item proves. Remove both containers when you are done:
 ```bash
 make local-clean
 ```
+
+## Deployment
+
+The deployment starts with these two steps. Neither uses a floating image tag.
+
+### 1. Bootstrap the GCP project
+
+```bash
+make bootstrap
+```
+
+Allow about 3-5 minutes in a fresh project. The target first enables the APIs
+declared by the bootstrap stack. It then queries the GCP APIs to prove that the
+chosen region offers `e2-medium`, the shared-core `db-g1-small` database tier,
+and an Artifact Registry location. Terraform cannot create the repository or
+its IAM bindings unless all three checks pass. It then creates the regional
+Docker repository and grants the build identity permission to push images and
+write build logs.
+
+The target finishes by describing the repository. Check that it reports a
+repository path followed by `DOCKER`. Destroying the bootstrap stack does not
+disable project APIs.
+
+### 2. Build and publish the application image
+
+```bash
+make image
+```
+
+Allow about 5-10 minutes for the first managed build. Cloud Build builds the
+existing `app/Dockerfile` and pushes the result as
+`${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress/wordpress:v1`. The `v1`
+tag is specific and intentionally does not float. The target finishes by
+listing the matching repository entry; check that its `TAGS` column contains
+`v1`.
+
+The managed build path was exercised successfully, so `make image` records the
+path actually used rather than the local Docker fallback.
