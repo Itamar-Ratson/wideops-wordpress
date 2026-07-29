@@ -420,12 +420,31 @@ exits unsuccessfully.
 make destroy
 ```
 
-This destroys the main stack, including the load balancer, VM, NAT gateway,
-private peering, Cloud SQL database, and both buckets. The uploads bucket uses
-`force_destroy`, so its media is deleted with the stack. The registered
-certificate and the ignored local pair both remain, alongside the bootstrap
-APIs and image repository, so a later `make infra` rebuilds the stack without
-repeating any of the one-time foundation work.
+This destroys the main stack, including the load balancer, VMs, NAT gateway,
+private peering, Cloud SQL primary and replica, and both buckets. The uploads
+bucket uses `force_destroy`, so its media is deleted with the stack. The
+registered certificate and the ignored local pair both remain, alongside the
+bootstrap APIs and image repository, so a later `make infra` rebuilds the stack
+without repeating any of the one-time foundation work.
+
+Expect the private peering to need a second pass. Cloud SQL's tenant project
+keeps the `servicenetworking-googleapis-com` peering attached after the
+instances themselves are gone, and Terraform cannot force it, so the run stops
+with `Failed to delete connection; Producer services (e.g. CloudSQL, Cloud
+Memstore, etc.) are still using this connection` and leaves the network, its
+reserved range, and the connection behind. Waiting does not clear it. Delete
+the peering directly, then run the target again:
+
+```bash
+gcloud compute networks peerings delete servicenetworking-googleapis-com \
+  --network=wp-vpc --project="${PROJECT_ID}"
+make destroy
+```
+
+Setting `deletion_policy = "ABANDON"` on the connection is not a fix. It skips
+the failing call, but Compute Engine then refuses to delete a network that
+still carries a peering, so the same run fails one resource later and leaves
+the peering behind silently.
 
 To remove the certificate as well, or to rotate it before its 365-day expiry,
 run this after `make destroy`:
