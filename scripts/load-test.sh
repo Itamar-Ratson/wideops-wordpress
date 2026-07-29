@@ -12,7 +12,10 @@ readonly FLOOR=2
 readonly DEFAULT_DURATION=600
 readonly DEFAULT_CONCURRENCY=50
 readonly DEFAULT_SAMPLE_INTERVAL=15
-readonly DEFAULT_SETTLE_TIMEOUT=1200
+# Scale-in returns the target to the floor promptly but drains the surplus
+# instances over several more minutes, and the test waits for both. An observed
+# run took 19m09s, so 20 minutes left too little margin to be a useful default.
+readonly DEFAULT_SETTLE_TIMEOUT=1800
 
 if (( $# != 4 )); then
     cat >&2 <<USAGE

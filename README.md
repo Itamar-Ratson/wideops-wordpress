@@ -372,8 +372,11 @@ make load-test
 ```
 
 The defaults run 50 concurrent workers for 600 seconds, sample every 15
-seconds, and then wait up to 1,200 seconds for scale-in. All four are
-overridable, in seconds apart from the worker count:
+seconds, and then wait up to 1,800 seconds for scale-in. Expect the whole run
+to take around 30 minutes: the autoscaler returns the target to two within a
+couple of minutes of load stopping, but the managed instance group drains the
+surplus instances over several more, and the test waits for both. All four
+values are overridable, in seconds apart from the worker count:
 
 ```bash
 make load-test \
@@ -391,13 +394,21 @@ deployment evidence. For example:
 
 ```text
 Driving https://203.0.113.10 with 50 workers for 600s.
+The test will then wait up to 1800s for the group to return to 2.
 2026-07-29T08:00:00Z phase=load     target=2 actual=2 http=200
-2026-07-29T08:02:30Z phase=load     target=4 actual=3 http=200
-2026-07-29T08:04:45Z phase=load     target=5 actual=5 http=200
+2026-07-29T08:00:45Z phase=load     target=3 actual=3 http=200
+2026-07-29T08:01:08Z phase=load     target=4 actual=4 http=200
+2026-07-29T08:06:02Z phase=load     target=5 actual=5 http=200
 Load stopped; watching scale-in.
-2026-07-29T08:20:15Z phase=scale-in target=2 actual=2 http=200
-The group scaled to 5/5 (target/actual), returned to two, and every availability sample succeeded.
+2026-07-29T08:10:11Z phase=scale-in target=5 actual=5 http=200
+2026-07-29T08:22:05Z phase=scale-in target=2 actual=5 http=200
+2026-07-29T08:29:01Z phase=scale-in target=2 actual=2 http=200
+The group scaled to 5/5 (target/actual), returned to 2, and every availability sample succeeded.
 ```
+
+The `target=2 actual=5` samples are the expected middle of scale-in, not a
+stall: the autoscaler lowers the target quickly, and the group then deletes the
+surplus instances one at a time.
 
 If scale-out is not observed, even one load worker or availability sample
 fails, or the group does not return to two before the settle timeout, the target
