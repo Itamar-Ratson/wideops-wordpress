@@ -247,12 +247,9 @@ splitting.
 Confirm the autoscaler policy, autohealing delay, and regional distribution:
 
 ```bash
-gcloud compute region-autoscalers describe wp-autoscaler \
-  --project="${PROJECT_ID}" --region="${REGION}" \
-  --format='yaml(autoscalingPolicy.minNumReplicas,autoscalingPolicy.maxNumReplicas,autoscalingPolicy.cpuUtilization.utilizationTarget,autoscalingPolicy.coolDownPeriodSec)'
 gcloud compute instance-groups managed describe wp-mig \
   --project="${PROJECT_ID}" --region="${REGION}" \
-  --format='yaml(autoHealingPolicies,distributionPolicy.zones)'
+  --format='yaml(autoscaler.autoscalingPolicy,autoHealingPolicies,distributionPolicy.zones)'
 ```
 
 Expected: a floor of `2`, ceiling of `5`, CPU target of `0.6`, and a
