@@ -1,4 +1,4 @@
-.PHONY: bootstrap image infra seed destroy local-check local-clean
+.PHONY: bootstrap image certificate infra seed destroy local-check local-clean
 
 # Recursively expanded on purpose: the seed recipe reads Terraform outputs, and
 # those must not be evaluated when an unrelated target runs.
@@ -15,12 +15,17 @@ image:
 	  --region=europe-north2 \
 	  --tag europe-north2-docker.pkg.dev/wideops-wordpress/wordpress/wordpress:v1
 
+certificate:
+	scripts/create-certificate.sh \
+	  $$($(TF_BOOTSTRAP) output -raw project_id)
+
 infra:
 	$(TF_MAIN) init
 	$(TF_MAIN) apply
 
-# Cloud SQL reads the dump from Cloud Storage itself, so this needs no network
-# path to the private instance.
+# Cloud SQL reads both SQL files from Cloud Storage itself, so this needs no
+# network path to the private instance. The second import applies the shared
+# rewrite with the load balancer's stable HTTPS address.
 seed:
 	gcloud sql import sql \
 	  $$($(TF_MAIN) output -raw sql_instance_name) \
@@ -28,6 +33,11 @@ seed:
 	  --project=$$($(TF_MAIN) output -raw project_id) \
 	  --database=wordpress \
 	  --quiet
+	scripts/rewrite-cloud-urls.sh \
+	  $$($(TF_MAIN) output -raw project_id) \
+	  $$($(TF_MAIN) output -raw sql_instance_name) \
+	  gs://$$($(TF_MAIN) output -raw project_id)-assets \
+	  $$($(TF_MAIN) output -raw load_balancer_ip)
 
 destroy:
 	$(TF_MAIN) destroy
