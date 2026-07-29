@@ -23,10 +23,15 @@ infra:
 	$(TF_MAIN) init
 	$(TF_MAIN) apply
 
-# Cloud SQL reads both SQL files from Cloud Storage itself, so this needs no
-# network path to the private instance. The second import applies the shared
-# rewrite with the load balancer's stable HTTPS address.
+# Supplied media is synced under its browser-visible path. Cloud SQL then reads
+# both SQL files from private Cloud Storage itself, so that needs no network path
+# to the private instance. The second import applies the shared rewrite with the
+# load balancer's stable HTTPS address.
 seed:
+	gcloud storage rsync --recursive \
+	  app/wp-content/uploads \
+	  $$($(TF_MAIN) output -raw uploads_uri) \
+	  --project=$$($(TF_MAIN) output -raw project_id)
 	gcloud sql import sql \
 	  $$($(TF_MAIN) output -raw sql_instance_name) \
 	  $$($(TF_MAIN) output -raw database_dump_uri) \
@@ -36,7 +41,7 @@ seed:
 	scripts/rewrite-cloud-urls.sh \
 	  $$($(TF_MAIN) output -raw project_id) \
 	  $$($(TF_MAIN) output -raw sql_instance_name) \
-	  gs://$$($(TF_MAIN) output -raw project_id)-assets \
+	  $$($(TF_MAIN) output -raw assets_uri) \
 	  $$($(TF_MAIN) output -raw load_balancer_ip)
 
 destroy:

@@ -16,6 +16,7 @@ resource "google_compute_instance_template" "wordpress" {
   # stay separate files instead of one shell script quoting YAML.
   metadata_startup_script = templatefile("${path.module}/startup.sh.tftpl", {
     artifact_registry_host = local.artifact_registry_host
+    uploads_bucket_name    = google_storage_bucket.uploads.name
 
     compose_file = templatefile("${path.module}/compose.yaml.tftpl", {
       sql_connection_name = google_sql_database_instance.wordpress.connection_name
@@ -47,6 +48,14 @@ resource "google_compute_instance_template" "wordpress" {
 }
 
 resource "google_compute_region_instance_group_manager" "wordpress" {
+  # Boot must not race the bucket permission or the prefix marker that GCS FUSE
+  # needs before the supplied uploads are seeded. This group, not the template,
+  # is what creates the instances that mount the bucket.
+  depends_on = [
+    google_storage_bucket_iam_member.wordpress_uploads_writer,
+    google_storage_bucket_object.uploads_prefix,
+  ]
+
   name               = "wp-mig"
   base_instance_name = "wp"
   region             = local.region

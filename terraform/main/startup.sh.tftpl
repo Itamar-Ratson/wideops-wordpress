@@ -1,5 +1,6 @@
 #!/bin/bash
-# shellcheck disable=SC2154 # Terraform renders the named template variables.
+# shellcheck disable=SC1091,SC2154
+# The base image supplies /etc/os-release; Terraform renders template variables.
 set -euo pipefail
 
 # Preserve the complete boot record in a file and syslog. The Ops Agent ships
@@ -8,8 +9,18 @@ exec > >(tee -a /var/log/wordpress-startup.log | logger --tag wordpress-startup)
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl docker.io docker-compose-v2
+apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg
 systemctl enable --now docker
+
+# GCS FUSE is installed from Google's signed apt repository. Rewriting the
+# source and key is safe when the startup script is run again.
+. /etc/os-release
+curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+  | gpg --dearmor --yes --output /usr/share/keyrings/cloud.google.gpg
+printf 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt gcsfuse-%s main\n' \
+  "$VERSION_CODENAME" > /etc/apt/sources.list.d/gcsfuse.list
+apt-get update -qq
+apt-get install -y -qq gcsfuse
 
 # Installing the agent is idempotent: the repository script and apt converge
 # on the already-installed package when this startup script is run again.
@@ -36,6 +47,23 @@ unset TOKEN
 # owned by it. This lives on tmpfs and is recreated on every boot, which is
 # what a socket directory should do.
 install -d -o 33 -g 33 -m 0755 /var/run/wordpress-mysqld
+
+# The bucket stores objects under the same wp-content/uploads prefix used by
+# public URLs, but only that prefix is exposed inside the container. Root owns
+# the FUSE process; uid/gid 33 present files as www-data, and allow_other lets
+# Apache cross FUSE's default mounting-user boundary. mountpoint makes this
+# safe to repeat without trying to mount over an existing mount.
+install -d -m 0755 /mnt/wordpress-uploads
+if ! mountpoint --quiet /mnt/wordpress-uploads; then
+  gcsfuse \
+    --implicit-dirs \
+    --only-dir wp-content/uploads \
+    --uid 33 \
+    --gid 33 \
+    -o allow_other \
+    "${uploads_bucket_name}" \
+    /mnt/wordpress-uploads
+fi
 
 install -d -m 0755 /opt/wordpress
 cat > /opt/wordpress/compose.yaml <<'COMPOSE'
