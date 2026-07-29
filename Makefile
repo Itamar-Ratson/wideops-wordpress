@@ -1,9 +1,13 @@
-.PHONY: bootstrap image certificate infra seed destroy local-check local-clean
+.PHONY: bootstrap image certificate infra seed load-test destroy local-check local-clean
 
 # Recursively expanded on purpose: the seed recipe reads Terraform outputs, and
 # those must not be evaluated when an unrelated target runs.
 TF_BOOTSTRAP = terraform -chdir=terraform/bootstrap
 TF_MAIN = terraform -chdir=terraform/main
+
+# Defaults live in the load-test script itself; these only forward an override
+# such as make load-test LOAD_DURATION=900 through to it.
+export LOAD_DURATION LOAD_CONCURRENCY LOAD_SAMPLE_INTERVAL LOAD_SETTLE_TIMEOUT
 
 bootstrap:
 	$(TF_BOOTSTRAP) init
@@ -43,6 +47,13 @@ seed:
 	  $$($(TF_MAIN) output -raw sql_instance_name) \
 	  $$($(TF_MAIN) output -raw assets_uri) \
 	  $$($(TF_MAIN) output -raw load_balancer_ip)
+
+load-test:
+	scripts/load-test.sh \
+	  "https://$$($(TF_MAIN) output -raw load_balancer_ip)" \
+	  "$$($(TF_MAIN) output -raw project_id)" \
+	  "$$($(TF_MAIN) output -raw region)" \
+	  "$$($(TF_MAIN) output -raw instance_group_name)"
 
 destroy:
 	$(TF_MAIN) destroy
