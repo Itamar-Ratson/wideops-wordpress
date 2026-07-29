@@ -71,7 +71,7 @@ resource "google_compute_region_instance_group_manager" "wordpress" {
 
   auto_healing_policies {
     health_check      = google_compute_health_check.wordpress.id
-    initial_delay_sec = 600
+    initial_delay_sec = local.instance_warmup_seconds
   }
 }
 
@@ -83,7 +83,7 @@ resource "google_compute_region_autoscaler" "wordpress" {
   autoscaling_policy {
     min_replicas    = 2
     max_replicas    = 5
-    cooldown_period = 600
+    cooldown_period = local.instance_warmup_seconds
 
     cpu_utilization {
       target = 0.6
