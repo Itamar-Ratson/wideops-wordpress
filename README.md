@@ -291,11 +291,22 @@ make destroy
 ```
 
 This destroys the main stack, including the load balancer, VM, NAT gateway,
-private peering, and Cloud SQL database, then deletes the externally managed
-certificate. The ignored local certificate pair remains so `make certificate`
-can register the same pair on a later deployment. The bootstrap APIs and image
-repository remain so the environment can be recreated without repeating the
-one-time foundation work.
+private peering, and Cloud SQL database. The registered certificate and the
+ignored local pair both remain, alongside the bootstrap APIs and image
+repository, so a later `make infra` rebuilds the stack without repeating any of
+the one-time foundation work.
+
+To remove the certificate as well, or to rotate it before its 365-day expiry,
+run this after `make destroy`:
+
+```bash
+scripts/delete-certificate.sh "${PROJECT_ID}"
+```
+
+It has to run with the stack down: Compute Engine refuses to delete a
+certificate while the HTTPS proxy still references it. Removing the local
+`.certificates/` pair too makes the next `make certificate` generate a fresh
+one instead of re-registering the old pair.
 
 ## Current architecture and request flow
 

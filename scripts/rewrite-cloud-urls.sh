@@ -18,17 +18,18 @@ readonly REPOSITORY_ROOT
 readonly REWRITE_SQL="${REPOSITORY_ROOT}/data/rewrite-urls.sql"
 readonly STAGED_REWRITE_URI="${BUCKET_URI}/seed/rewrite-public-urls.sql"
 
-if [[ ! "${LOAD_BALANCER_IP}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+# The address is interpolated into a quoted SQL string below, so it is
+# validated rather than trusted.
+invalid_address() {
     printf 'Invalid load-balancer IPv4 address: %s\n' "${LOAD_BALANCER_IP}" >&2
     exit 1
-fi
+}
+
+[[ "${LOAD_BALANCER_IP}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || invalid_address
 
 IFS=. read -r -a address_octets <<< "${LOAD_BALANCER_IP}"
 for octet in "${address_octets[@]}"; do
-    if (( 10#${octet} > 255 )); then
-        printf 'Invalid load-balancer IPv4 address: %s\n' "${LOAD_BALANCER_IP}" >&2
-        exit 1
-    fi
+    (( 10#${octet} <= 255 )) || invalid_address
 done
 
 {

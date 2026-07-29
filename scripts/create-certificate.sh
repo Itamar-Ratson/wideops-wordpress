@@ -33,15 +33,12 @@ if [[ "${registered_certificate}" == "${CERTIFICATE_NAME}" ]]; then
 fi
 
 install -d -m 0700 "${CERTIFICATE_DIRECTORY}"
-umask 077
 
-if [[ -e "${CERTIFICATE_FILE}" || -e "${PRIVATE_KEY_FILE}" ]]; then
-    if [[ ! -f "${CERTIFICATE_FILE}" || ! -f "${PRIVATE_KEY_FILE}" ]]; then
-        printf 'Refusing to use an incomplete local certificate pair in %s.\n' \
-            "${CERTIFICATE_DIRECTORY}" >&2
-        exit 1
-    fi
-else
+# Reached only when nothing is registered, so regenerating cannot desync from a
+# live certificate. A lone .crt or .key is unusable, so a missing half means
+# both are rewritten under a umask that restricts the key to its owner.
+if [[ ! -f "${CERTIFICATE_FILE}" || ! -f "${PRIVATE_KEY_FILE}" ]]; then
+    umask 077
     openssl req \
         -x509 \
         -newkey rsa:2048 \

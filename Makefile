@@ -41,9 +41,6 @@ seed:
 
 destroy:
 	$(TF_MAIN) destroy
-	gcloud compute ssl-certificates delete wp-self-signed \
-	  --project=$$($(TF_BOOTSTRAP) output -raw project_id) \
-	  --global --quiet
 
 local-check: local-clean
 	docker compose up --build --wait
