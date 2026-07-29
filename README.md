@@ -1,11 +1,10 @@
 # Highly Available WordPress on GCP
 
 This project packages the supplied WordPress 4.9.4 site without modifying it
-and builds toward a highly available, autoscaling Google Cloud environment.
-The current deployment slice serves one privately networked server through a
-global HTTPS load balancer, keeps relational data in Cloud SQL, and keeps media
-in Cloud Storage behind Cloud CDN. The final slice adds autoscaling,
-autohealing, and a database replica.
+and runs it in a highly available, autoscaling Google Cloud environment. A
+regional managed instance group keeps two to five privately networked servers
+behind a global HTTPS load balancer, Cloud SQL holds relational data and a read
+replica, and Cloud Storage serves shared media through Cloud CDN.
 
 ## Prerequisites
 
@@ -203,12 +202,13 @@ Expected: `wp-self-signed SELF_MANAGED`.
 make infra
 ```
 
-Allow about 10-15 minutes. Cloud SQL is the slowest resource. The target creates
-the custom network, NAT gateway, private database, dedicated instance identity,
-private seed and public uploads buckets, fixed regional instance group
-containing one `e2-medium` server, and global load balancer with a CDN-enabled
-bucket backend. The main stack reads the project and region from the bootstrap
-stack's local outputs, so those values remain configured in one place.
+Allow about 15-20 minutes. Cloud SQL and its read replica are the slowest
+resources. The target creates the custom network, NAT gateway, private primary
+and replica databases, dedicated instance identity, private seed and public
+uploads buckets, regional instance group containing at least two `e2-medium`
+servers, and global load balancer with a CDN-enabled bucket backend. The main
+stack reads the project and region from the bootstrap stack's local outputs, so
+those values remain configured in one place.
 
 Confirm that the VM has an internal address and no external address:
 
@@ -227,6 +227,37 @@ gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
 ```
 
 Expected: a `PRIVATE` row and no `PRIMARY` public address.
+
+Confirm the replica follows that private primary, and that the primary has the
+stream source a replica needs:
+
+```bash
+gcloud sql instances describe wp-replica --project="${PROJECT_ID}" \
+  --format='value(masterInstanceName,ipAddresses[0].type)'
+gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
+  --format='value(settings.backupConfiguration.enabled,settings.backupConfiguration.binaryLogEnabled)'
+```
+
+Expected: the first command names `wp-primary` and reports `PRIVATE`; the
+second prints `True True`. WordPress's rendered proxy command still contains
+only the primary's connection name. The replica is deliberately reserved for
+reporting or analytical reads rather than application-level read/write
+splitting.
+
+Confirm the autoscaler policy, autohealing delay, and regional distribution:
+
+```bash
+gcloud compute region-autoscalers describe wp-autoscaler \
+  --project="${PROJECT_ID}" --region="${REGION}" \
+  --format='yaml(autoscalingPolicy.minNumReplicas,autoscalingPolicy.maxNumReplicas,autoscalingPolicy.cpuUtilization.utilizationTarget,autoscalingPolicy.coolDownPeriodSec)'
+gcloud compute instance-groups managed describe wp-mig \
+  --project="${PROJECT_ID}" --region="${REGION}" \
+  --format='yaml(autoHealingPolicies,distributionPolicy.zones)'
+```
+
+Expected: a floor of `2`, ceiling of `5`, CPU target of `0.6`, and a
+600-second initialization period. The group lists multiple zones and uses
+`wp-tcp-health` for healing with the same 600-second initial delay.
 
 The first boot installs Docker, GCS FUSE, and the Google Cloud Ops Agent,
 authenticates to Artifact Registry with a short-lived metadata-server token,
@@ -310,33 +341,72 @@ UPLOADS_URI=$(terraform -chdir=terraform/main output -raw uploads_uri)
 gcloud storage ls "${UPLOADS_URI}/**" --project="${PROJECT_ID}"
 ```
 
-Finally, record the current VM's last boot time, recreate it through the managed
-instance group, and wait for the replacement to become healthy. The page and new
-image must still load afterward, which proves the object survived independently
-of the server that wrote it:
+Finally, delete one VM directly and wait for the managed instance group to
+restore its floor. The page and new image must stay available while the group
+returns to two, which proves both automatic replacement and that the object
+survived independently of the server that wrote it:
 
 ```bash
 VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
   --filter='name~^wp-' --format='value(name)' --limit=1)
 ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
   --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
-gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
-  --zone="${ZONE}" --format='value(lastStartTimestamp)'
-gcloud compute instance-groups managed recreate-instances wp-mig \
-  --project="${PROJECT_ID}" --region="${REGION}" --instances="${VM}"
+gcloud compute instances delete "${VM}" --project="${PROJECT_ID}" \
+  --zone="${ZONE}" --quiet
 gcloud compute instance-groups managed wait-until wp-mig \
   --project="${PROJECT_ID}" --region="${REGION}" --stable
-gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
-  --zone="${ZONE}" --format='value(lastStartTimestamp)'
+gcloud compute instance-groups managed list-instances wp-mig \
+  --project="${PROJECT_ID}" --region="${REGION}" \
+  --format='table(instance.basename(),instanceStatus,instanceHealth[0].detailedHealthState)'
 ```
 
-Expected: the boot timestamp advances. Use that rather than the instance ID,
-which `recreate-instances` preserves along with `creationTimestamp` even though
-the disk is rebuilt from the current template. The rebuild also changes the
-host's SSH key, so the next `gcloud compute ssh` prompts about a stale entry in
-`~/.ssh/google_compute_known_hosts`.
+Expected: the table returns to two `RUNNING` instances without intervention.
+The replacement's startup script rebuilds the whole runtime from the current
+template; no useful state was present on the deleted boot disk.
 
-### 6. Tear down
+### 6. Demonstrate autoscaling and availability
+
+Run the load demonstration after seeding, when the homepage executes real PHP
+and database work. Requests for its images bypass the VM through the bucket
+backend, so the CPU signal measures application work rather than JPEG delivery:
+
+```bash
+make load-test
+```
+
+The defaults run 50 concurrent workers for 600 seconds, sample every 15
+seconds, and then wait up to 1,200 seconds for scale-in. All four values are
+overridable in seconds:
+
+```bash
+make load-test \
+  LOAD_DURATION=900 \
+  LOAD_CONCURRENCY=80 \
+  LOAD_SAMPLE_INTERVAL=10 \
+  LOAD_SETTLE_TIMEOUT=1800
+```
+
+Each line prints the autoscaler's target size, the number of existing
+instances, and an independent HTTP status. A successful run grows from the
+two-instance floor toward the five-instance ceiling, keeps returning HTTP 200,
+and eventually returns to two after load stops. Keep the output as the
+deployment evidence. For example:
+
+```text
+Driving https://203.0.113.10 with 50 workers for 600s.
+2026-07-29T08:00:00Z phase=load     target=2 actual=2 http=200
+2026-07-29T08:02:30Z phase=load     target=4 actual=3 http=200
+2026-07-29T08:04:45Z phase=load     target=5 actual=5 http=200
+Load stopped; watching scale-in.
+2026-07-29T08:20:15Z phase=scale-in target=2 actual=2 http=200
+The group scaled to 5/5 (target/actual), returned to two, and every availability sample succeeded.
+```
+
+If scale-out is not observed, even one load worker or availability sample
+fails, or the group does not return to two before the settle timeout, the target
+exits unsuccessfully.
+
+### 7. Tear down
 
 ```bash
 make destroy
@@ -378,12 +448,14 @@ application URL map
   +-- all other paths --> WordPress backend service
   |                        | TCP health check on :80
   |                        v
-  |                    regional MIG: 1 VM, no public IP
+  |                    regional MIG: 2-5 VMs across zones, no public IP
   |                        |
   |                        +-- WordPress -- Unix socket --> SQL proxy
   |                                                       |
   |                                                       v private path
-  |                                                  Cloud SQL MySQL 8
+  |                                                  Cloud SQL MySQL 8 primary
+  |                                                       |
+  |                                                       +--> read replica
   |
   +-- /wp-content/uploads/* --> Cloud CDN --> public uploads bucket
 
@@ -407,10 +479,11 @@ the CDN-backed bucket and never consume VM, Apache, or PHP capacity.
 - The separate uploads bucket holds supplied and newly uploaded media at
   `wp-content/uploads/...`. It is durable across VM replacement and shared by
   every instance.
-- Relational data lives in Cloud SQL, not on the VM disk. The Cloud SQL Auth
-  Proxy exposes the instance as a Unix socket shared with the WordPress
-  container, so the supplied `DB_HOST='localhost'` resolves the same way it does
-  locally.
+- Relational data lives in the Cloud SQL primary, not on a VM disk, and streams
+  through binary logs to a read replica. Automated primary backups provide a
+  recovery path. The Cloud SQL Auth Proxy exposes only the primary as a Unix
+  socket shared with the WordPress container, so the supplied
+  `DB_HOST='localhost'` resolves the same way it does locally.
 - The VM boot disk contains only replaceable runtime files, container layers,
   and logs. Central copies of system logs are sent to Cloud Logging.
 - Terraform resource state is local in each stack and excluded from version
@@ -477,6 +550,16 @@ The backend health check is TCP on port 80. It verifies that Apache accepts a
 connection without executing PHP or querying Cloud SQL, so a shared database
 incident cannot mark every server unhealthy at once.
 
+That same check drives autohealing. A new VM gets 600 seconds to install its
+packages, pull the two containers, mount the uploads bucket, and pass Compose
+health before the manager may judge it unhealthy. The autoscaler also ignores
+a new VM's boot CPU for 600 seconds, preventing scale-out from mistaking package
+installation for visitor demand. After that window, average CPU above the 60%
+target grows the regional group as far as five; falling demand returns it to a
+floor of two. A regional group distributes those instances across zones, so a
+single VM or zone loss leaves capacity for the load balancer while replacement
+occurs.
+
 The VM runs as `wordpress-vm`, not the project's default service account. It
 has exactly three project roles:
 
@@ -512,7 +595,7 @@ would hide stateful-server behavior rather than solve it and would add no value
 here. Admin login still uses secure cookies because Apache sees the forwarded
 HTTPS signal described above.
 
-## Known limitations of this slice
+## Known limitations
 
 **The database credential is hardcoded.** `Foxtrot01` is fixed in the
 supplied `wp-config.php`, which may not be edited, and therefore also appears
@@ -526,7 +609,23 @@ That is acceptable for this demo while the only credential in state is the
 already-supplied database password. [The decisions record](docs/decisions.md)
 describes the migration to a versioned, IAM-restricted Cloud Storage backend.
 
-**This is not the final availability design.** The current group is fixed at
-one server and still has no autohealing, autoscaling, or read replica. Issue #8
-adds those capabilities without weakening the private network, durable media,
-or public HTTPS entry point established here.
+## Deferred improvements
+
+- **Remote Terraform state:** move both stacks to versioned, IAM-restricted GCS
+  backends before multiple operators collaborate; local state keeps this demo's
+  bootstrap linear and contains no certificate private key.
+- **Terraform-managed certificate and image build:** move both into the graph
+  after state is remote. Doing it now would place the TLS private key in a local
+  state file and add a second provider for an image whose source is fixed.
+- **Keyless CI/CD:** use GitHub Actions with Workload Identity Federation for
+  pull-request plans and merge-time applies; it is deferred because this
+  assignment asks for an explicit, explainable manual deployment sequence.
+- **Pre-baked machine images:** install Docker, GCS FUSE, and the Ops Agent with
+  Packer to shorten scale-out by one to two minutes; startup remains scripted
+  here so every dependency is visible in one place.
+- **Object caching:** add Redis only when application demand justifies its cost;
+  it needs a WordPress drop-in, adds roughly $36/month, and would suppress the
+  CPU signal used by this autoscaling demonstration.
+- **Rotate the database credential:** replace `Foxtrot01` and store the new
+  credential in Secret Manager in a real engagement; it is deferred because
+  the supplied, immutable `wp-config.php` hardcodes the current value.

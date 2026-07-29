@@ -11,6 +11,30 @@ resource "google_sql_database_instance" "wordpress" {
     availability_type = "ZONAL"
     tier              = var.database_tier
 
+    backup_configuration {
+      binary_log_enabled = true
+      enabled            = true
+    }
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.wordpress.id
+    }
+  }
+}
+
+resource "google_sql_database_instance" "wordpress_replica" {
+  name                 = "wp-replica"
+  database_version     = "MYSQL_8_0"
+  master_instance_name = google_sql_database_instance.wordpress.name
+  region               = local.region
+
+  deletion_protection = false
+
+  settings {
+    availability_type = "ZONAL"
+    tier              = var.database_tier
+
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.wordpress.id

@@ -59,7 +59,6 @@ resource "google_compute_region_instance_group_manager" "wordpress" {
   name               = "wp-mig"
   base_instance_name = "wp"
   region             = local.region
-  target_size        = 1
 
   version {
     instance_template = google_compute_instance_template.wordpress.id
@@ -68,5 +67,26 @@ resource "google_compute_region_instance_group_manager" "wordpress" {
   named_port {
     name = "http"
     port = 80
+  }
+
+  auto_healing_policies {
+    health_check      = google_compute_health_check.wordpress.id
+    initial_delay_sec = 600
+  }
+}
+
+resource "google_compute_region_autoscaler" "wordpress" {
+  name   = "wp-autoscaler"
+  region = local.region
+  target = google_compute_region_instance_group_manager.wordpress.id
+
+  autoscaling_policy {
+    min_replicas    = 2
+    max_replicas    = 5
+    cooldown_period = 600
+
+    cpu_utilization {
+      target = 0.6
+    }
   }
 }

@@ -23,6 +23,11 @@ output "project_id" {
   value       = local.project_id
 }
 
+output "replica_instance_name" {
+  description = "Cloud SQL read replica available for reporting and analytical reads."
+  value       = google_sql_database_instance.wordpress_replica.name
+}
+
 output "region" {
   description = "GCP region inherited from the bootstrap stack."
   value       = local.region
