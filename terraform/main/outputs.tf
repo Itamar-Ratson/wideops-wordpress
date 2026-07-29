@@ -38,6 +38,11 @@ output "sql_instance_name" {
   value       = google_sql_database_instance.wordpress.name
 }
 
+output "uploads_uri" {
+  description = "Cloud Storage URI whose prefix matches the public WordPress uploads path."
+  value       = "gs://${google_storage_bucket.uploads.name}/wp-content/uploads"
+}
+
 output "wordpress_url" {
   description = "Public HTTPS URL of the migrated WordPress site."
   value       = "https://${google_compute_global_address.wordpress.address}"

@@ -33,9 +33,33 @@ resource "google_compute_backend_service" "wordpress" {
   }
 }
 
+resource "google_compute_backend_bucket" "uploads" {
+  name        = "wp-uploads-backend"
+  bucket_name = google_storage_bucket.uploads.name
+  enable_cdn  = true
+}
+
 resource "google_compute_url_map" "wordpress" {
   name            = "wp-url-map"
   default_service = google_compute_backend_service.wordpress.id
+
+  host_rule {
+    hosts        = ["*"]
+    path_matcher = "wordpress"
+  }
+
+  path_matcher {
+    name            = "wordpress"
+    default_service = google_compute_backend_service.wordpress.id
+
+    path_rule {
+      paths = [
+        "/wp-content/uploads",
+        "/wp-content/uploads/*",
+      ]
+      service = google_compute_backend_bucket.uploads.id
+    }
+  }
 }
 
 resource "google_compute_target_https_proxy" "wordpress" {

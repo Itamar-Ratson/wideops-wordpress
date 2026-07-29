@@ -25,6 +25,9 @@ services:
       - "80:80"
     volumes:
       - /var/run/wordpress-mysqld:/var/run/mysqld
+      # GCS FUSE is on the host write path only. Public reads are routed by the
+      # load balancer straight to the bucket backend.
+      - /mnt/wordpress-uploads:/var/www/html/wp-content/uploads
     # Ordering only. The proxy is distroless, so it cannot run a healthcheck of
     # its own; the app's healthcheck below is the condition that `docker compose
     # up --wait` blocks on.

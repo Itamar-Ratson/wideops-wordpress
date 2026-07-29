@@ -3,8 +3,9 @@
 This project packages the supplied WordPress 4.9.4 site without modifying it
 and builds toward a highly available, autoscaling Google Cloud environment.
 The current deployment slice serves one privately networked server through a
-global HTTPS load balancer backed by Cloud SQL. Later slices add durable media,
-autoscaling, autohealing, and a database replica.
+global HTTPS load balancer, keeps relational data in Cloud SQL, and keeps media
+in Cloud Storage behind Cloud CDN. The final slice adds autoscaling,
+autohealing, and a database replica.
 
 ## Prerequisites
 
@@ -204,8 +205,9 @@ make infra
 
 Allow about 10-15 minutes. Cloud SQL is the slowest resource. The target creates
 the custom network, NAT gateway, private database, dedicated instance identity,
-fixed regional instance group containing one `e2-medium` server, and global
-load balancer. The main stack reads the project and region from the bootstrap
+private seed and public uploads buckets, fixed regional instance group
+containing one `e2-medium` server, and global load balancer with a CDN-enabled
+bucket backend. The main stack reads the project and region from the bootstrap
 stack's local outputs, so those values remain configured in one place.
 
 Confirm that the VM has an internal address and no external address:
@@ -226,12 +228,13 @@ gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
 
 Expected: a `PRIVATE` row and no `PRIMARY` public address.
 
-The first boot installs Docker and the Google Cloud Ops Agent, authenticates to
-Artifact Registry with a short-lived metadata-server token, writes a
-Terraform-rendered `/opt/wordpress/compose.yaml`, and brings it up. That file
-mirrors the local one: the Cloud SQL Auth Proxy takes MySQL's place as the
-service backing the shared Unix socket, and WordPress is otherwise unchanged.
-Check it through IAP:
+The first boot installs Docker, GCS FUSE, and the Google Cloud Ops Agent,
+authenticates to Artifact Registry with a short-lived metadata-server token,
+mounts only the uploads prefix, writes a Terraform-rendered
+`/opt/wordpress/compose.yaml`, and brings it up. That file mirrors the local
+one: the Cloud SQL Auth Proxy takes MySQL's place as the service backing the
+shared Unix socket, while the host mount takes the place of the image's uploads
+directory. WordPress itself is unchanged. Check it through IAP:
 
 ```bash
 VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
@@ -240,13 +243,13 @@ ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
   --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
 gcloud compute ssh "${VM}" --project="${PROJECT_ID}" --zone="${ZONE}" \
   --tunnel-through-iap \
-  --command='sudo tail -50 /var/log/wordpress-startup.log; sudo docker ps'
+  --command='findmnt /mnt/wordpress-uploads; sudo tail -50 /var/log/wordpress-startup.log; sudo docker ps'
 ```
 
-Expected: the `db` and `app` containers are running, with `app` healthy. The
-startup script is safe to run again: package installation converges, and
-Compose reconciles the running containers against the same declared file rather
-than recreating them.
+Expected: the uploads path reports `fuse.gcsfuse`, and the `db` and `app`
+containers are running, with `app` healthy. The startup script is safe to run
+again: package installation converges, `mountpoint` skips an existing mount,
+and Compose reconciles the running containers against the same declared file.
 
 ### 5. Seed and rewrite the managed database
 
@@ -254,11 +257,14 @@ than recreating them.
 make seed
 ```
 
-Run this once on the fresh database. The first control-plane import loads the
-supplied dump. The second stages `data/rewrite-urls.sql` with the destination
-set to the load balancer's stable HTTPS address and imports it through the same
-Cloud SQL control-plane path. Nothing connects to the private instance over the
-network, and the supplied dump and WordPress tree remain unmodified.
+Run this once on the fresh database. It first syncs the supplied
+`app/wp-content/uploads` tree to the uploads bucket under that same
+`wp-content/uploads` path, so stored object names match browser paths without
+rewriting. The first control-plane import then loads the supplied dump. The
+second stages `data/rewrite-urls.sql` with the destination set to the load
+balancer's stable HTTPS address and imports it through the same Cloud SQL
+control-plane path. Nothing connects to the private instance over the network,
+and the supplied dump and WordPress tree remain unmodified.
 
 Confirm HTTPS, the permanent HTTP redirect, the migrated page, the rewrite, and
 an existing PATH_INFO permalink:
@@ -284,6 +290,46 @@ gcloud compute backend-services get-health wp-backend \
   --project="${PROJECT_ID}" --global
 ```
 
+Confirm that an existing media request goes to Cloud Storage rather than
+Apache. Storage-provider headers such as `x-goog-generation` and
+`x-goog-storage-class` prove which backend answered:
+
+```bash
+IP=$(terraform -chdir=terraform/main output -raw load_balancer_ip)
+curl --insecure --silent --head \
+  "https://${IP}/wp-content/uploads/2018/02/IMG_6056.jpg" \
+  | grep --ignore-case '^x-goog-'
+```
+
+For an end-to-end write check, log in at `https://${IP}/wp-admin/`, upload a
+uniquely named image, and place it on a page. Its public URL must load and the
+object must appear beneath the bucket prefix:
+
+```bash
+UPLOADS_URI=$(terraform -chdir=terraform/main output -raw uploads_uri)
+gcloud storage ls "${UPLOADS_URI}/**" --project="${PROJECT_ID}"
+```
+
+Finally, record the current VM's numeric ID, recreate it through the managed
+instance group, and wait for the replacement to become healthy. The page and
+new image must still load afterward; the changed ID proves that the page is now
+served by a different instance while the object survived independently:
+
+```bash
+VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
+  --filter='name~^wp-' --format='value(name)' --limit=1)
+ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
+  --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
+gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
+  --zone="${ZONE}" --format='value(id)'
+gcloud compute instance-groups managed recreate-instances wp-mig \
+  --project="${PROJECT_ID}" --region="${REGION}" --instances="${VM}"
+gcloud compute instance-groups managed wait-until wp-mig \
+  --project="${PROJECT_ID}" --region="${REGION}" --stable
+gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
+  --zone="${ZONE}" --format='value(id)'
+```
+
 ### 6. Tear down
 
 ```bash
@@ -291,10 +337,11 @@ make destroy
 ```
 
 This destroys the main stack, including the load balancer, VM, NAT gateway,
-private peering, and Cloud SQL database. The registered certificate and the
-ignored local pair both remain, alongside the bootstrap APIs and image
-repository, so a later `make infra` rebuilds the stack without repeating any of
-the one-time foundation work.
+private peering, Cloud SQL database, and both buckets. The uploads bucket uses
+`force_destroy`, so its media is deleted with the stack. The registered
+certificate and the ignored local pair both remain, alongside the bootstrap
+APIs and image repository, so a later `make infra` rebuilds the stack without
+repeating any of the one-time foundation work.
 
 To remove the certificate as well, or to rotate it before its 365-day expiry,
 run this after `make destroy`:
@@ -322,7 +369,7 @@ global external Application Load Balancer
   v
 application URL map
   |
-  +-- all paths today --> WordPress backend service
+  +-- all other paths --> WordPress backend service
   |                        | TCP health check on :80
   |                        v
   |                    regional MIG: 1 VM, no public IP
@@ -332,27 +379,28 @@ application URL map
   |                                                       v private path
   |                                                  Cloud SQL MySQL 8
   |
-  +.. /wp-content/uploads/* ..> CDN + bucket backend
-                                  planned in issue #7; not active yet
+  +-- /wp-content/uploads/* --> Cloud CDN --> public uploads bucket
 
 Operator -- SSH through Identity-Aware Proxy --> regional MIG
 VM outbound package/image traffic ------------> Cloud NAT
 ```
 
-The diagram shows both final request backends, with the not-yet-active media
-route dotted and labelled. In this slice the application URL map sends every
-HTTPS path to the WordPress backend. Issue #7 adds the path rule and bucket
-backend without changing either public frontend.
+The application URL map chooses between two backends without changing either
+public frontend. Dynamic requests reach WordPress; upload reads go directly to
+the CDN-backed bucket and never consume VM, Apache, or PHP capacity.
 
 ### Where state lives
 
-- Application code and the supplied media are baked into the immutable
-  `wordpress:v1` image. A VM can be recreated from that image, but new uploads
-  are not durable yet; issue #7 moves them to the assets bucket.
-- The assets bucket holds the supplied database dump so Cloud SQL can import it
-  without a network path to the instance. It has uniform bucket-level access and
-  enforced public access prevention, and the only grant on it is object read for
-  the Cloud SQL instance's own identity.
+- Application code is baked into the immutable `wordpress:v1` image. Its
+  supplied uploads are seed input only; the runtime uploads directory is a GCS
+  FUSE mount backed by the uploads bucket.
+- The private assets bucket holds the supplied database dump so Cloud SQL can
+  import it without a network path to the instance. It has uniform bucket-level
+  access, enforced public access prevention, and object read for only the Cloud
+  SQL instance's own identity.
+- The separate uploads bucket holds supplied and newly uploaded media at
+  `wp-content/uploads/...`. It is durable across VM replacement and shared by
+  every instance.
 - Relational data lives in Cloud SQL, not on the VM disk. The Cloud SQL Auth
   Proxy exposes the instance as a Unix socket shared with the WordPress
   container, so the supplied `DB_HOST='localhost'` resolves the same way it does
@@ -362,6 +410,37 @@ backend without changing either public frontend.
 - Terraform resource state is local in each stack and excluded from version
   control. The main stack reads only the bootstrap stack's non-secret project,
   region, and repository outputs.
+
+### Media storage and delivery
+
+GCS FUSE is intentionally only on the write path. During boot, root mounts the
+uploads bucket's `wp-content/uploads` prefix at
+`/mnt/wordpress-uploads`; Compose bind-mounts that directory over WordPress's
+normal `/var/www/html/wp-content/uploads` path. The mount presents objects as
+uid and gid 33 (`www-data`) and uses `allow_other`, because FUSE otherwise
+allows only the root user that created the mount to enter it. WordPress can
+therefore create originals and thumbnails without application changes.
+
+The load balancer sends every public `/wp-content/uploads/*` request to a
+CDN-enabled backend bucket. It does not read the host mount, start Apache, or
+execute PHP. Besides avoiding needless compute cost, that keeps the CPU signal
+used by the later autoscaler representative of application work.
+
+Backend buckets fetch anonymously, so `allUsers` receives
+`roles/storage.objectViewer` on the uploads bucket. That built-in role also
+permits object listing: the bucket is deliberately public and enumerable. This
+is acceptable here because it contains only media already published by the
+site; the private SQL dump remains in a different bucket. Signed URLs were
+rejected because they would require WordPress to generate them. Keeping the
+bucket private was also rejected because it would force reads back through GCS
+FUSE and the servers, defeating the CDN design. The preferred future tightening
+is a custom bucket role containing object-read but not object-list permission;
+the built-in read-only alternative was not selected because its name is
+`legacy`-prefixed.
+
+The instance identity receives `roles/storage.objectUser` on this bucket
+itself, not on the project. It can create, update, and delete WordPress media but
+cannot use that grant to reach any other project storage.
 
 ### Networking and security
 
@@ -401,8 +480,9 @@ has exactly three project roles:
 - `roles/logging.logWriter` lets the Ops Agent send logs.
 
 The broad `cloud-platform` OAuth scope does not add permissions; IAM still
-limits the identity to those three roles. No service-account key is created.
-The database and persistent disks use Google-managed encryption at rest.
+limits the identity to those three roles, plus the uploads bucket-scoped object
+grant described above. No service-account key is created. The database,
+persistent disks, and buckets use Google-managed encryption at rest.
 
 Confirm startup logs have reached Cloud Logging:
 
@@ -441,6 +521,6 @@ already-supplied database password. [The decisions record](docs/decisions.md)
 describes the migration to a versioned, IAM-restricted Cloud Storage backend.
 
 **This is not the final availability design.** The current group is fixed at
-one server and still has no durable upload storage, autohealing, autoscaling, or
-read replica. Issues #7-#8 add those capabilities in vertical slices without
-weakening the private network or public HTTPS entry point established here.
+one server and still has no autohealing, autoscaling, or read replica. Issue #8
+adds those capabilities without weakening the private network, durable media,
+or public HTTPS entry point established here.

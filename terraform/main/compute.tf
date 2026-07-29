@@ -4,6 +4,13 @@ data "google_compute_image" "ubuntu" {
 }
 
 resource "google_compute_instance_template" "wordpress" {
+  # Boot must not race the bucket permission or the prefix marker that GCS FUSE
+  # needs before the supplied uploads are seeded.
+  depends_on = [
+    google_storage_bucket_iam_member.wordpress_uploads_writer,
+    google_storage_bucket_object.uploads_prefix,
+  ]
+
   name_prefix  = "wp-"
   machine_type = var.machine_type
   tags         = ["wordpress"]
@@ -16,6 +23,7 @@ resource "google_compute_instance_template" "wordpress" {
   # stay separate files instead of one shell script quoting YAML.
   metadata_startup_script = templatefile("${path.module}/startup.sh.tftpl", {
     artifact_registry_host = local.artifact_registry_host
+    uploads_bucket_name    = google_storage_bucket.uploads.name
 
     compose_file = templatefile("${path.module}/compose.yaml.tftpl", {
       sql_connection_name = google_sql_database_instance.wordpress.connection_name
