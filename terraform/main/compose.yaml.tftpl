@@ -1,0 +1,43 @@
+# Rendered by Terraform and written to /opt/wordpress/compose.yaml at boot.
+# Deliberately mirrors the repository's local compose.yaml: the supplied
+# wp-config.php pins DB_HOST='localhost', and app/Dockerfile pins
+# mysqli.default_socket, so PHP reaches MySQL through a Unix socket in both
+# environments. Only the service backing that socket differs.
+name: wideops-wordpress
+
+services:
+  db:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+    # The image is distroless and defaults to uid 65532. Apache's workers run
+    # as www-data (33) and need write access to the socket, so the proxy
+    # creates it as that user instead.
+    user: "33:33"
+    command:
+      - "--private-ip"
+      - "${sql_connection_name}?unix-socket-path=/var/run/mysqld/mysqld.sock"
+    volumes:
+      - /var/run/wordpress-mysqld:/var/run/mysqld
+    restart: unless-stopped
+
+  app:
+    image: ${wordpress_image}
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/wordpress-mysqld:/var/run/mysqld
+    # Ordering only. The proxy is distroless, so it cannot run a healthcheck of
+    # its own; the app's healthcheck below is the condition that `docker compose
+    # up --wait` blocks on.
+    depends_on:
+      - db
+    healthcheck:
+      # KNOWN WEAK — see docs/decisions.md §4. This returns 200 even when the
+      # proxy is stopped, because PHP writes a deprecation warning before any
+      # header and WordPress can no longer send its own 500. It currently proves
+      # only that Apache serves, not that the database is reachable.
+      test:
+        ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+    restart: unless-stopped

@@ -8,6 +8,16 @@ output "project_number" {
   value       = data.google_project.current.number
 }
 
+output "project_id" {
+  description = "GCP project ID consumed by the main stack."
+  value       = var.project_id
+}
+
+output "region" {
+  description = "GCP region consumed by the main stack."
+  value       = var.region
+}
+
 output "repository_id" {
   description = "Artifact Registry repository that holds the WordPress image."
   value       = google_artifact_registry_repository.wordpress.repository_id
