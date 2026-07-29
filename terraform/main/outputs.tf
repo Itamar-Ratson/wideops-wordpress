@@ -1,3 +1,8 @@
+output "assets_uri" {
+  description = "Cloud Storage URI of the private bucket that make seed stages the rewrite in."
+  value       = "gs://${google_storage_bucket.assets.name}"
+}
+
 output "database_dump_uri" {
   description = "Cloud Storage URI of the supplied dump that make seed imports."
   value       = "gs://${google_storage_bucket.assets.name}/${google_storage_bucket_object.database_dump.name}"

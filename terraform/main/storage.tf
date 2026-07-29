@@ -29,22 +29,28 @@ resource "google_storage_bucket_iam_member" "sql_import_reader" {
 
 # Uploads live separately from the private database seed data because the load
 # balancer's backend bucket reads objects anonymously. Keeping this bucket
-# media-only makes that public access boundary explicit.
+# media-only makes that public access boundary explicit. Prevention is inherited
+# rather than enforced because the allUsers grant below is the point of this
+# bucket.
 resource "google_storage_bucket" "uploads" {
   name                        = "${local.project_id}-uploads"
   location                    = local.region
-  public_access_prevention    = "inherited"
   uniform_bucket_level_access = true
+  public_access_prevention    = "inherited"
 
+  # Media here is re-uploadable from the supplied tree in this slice, so
+  # teardown should not need objects cleared by hand first.
   force_destroy = true
 }
 
 # GCS FUSE mounts only this prefix. The marker makes the prefix available on a
 # first boot before `make seed` has copied the supplied media into the bucket.
+# The content is non-empty because the provider rejects an empty string as an
+# unset argument, and it is world-readable like everything else in this bucket.
 resource "google_storage_bucket_object" "uploads_prefix" {
   name    = "wp-content/uploads/.keep"
   bucket  = google_storage_bucket.uploads.name
-  content = ""
+  content = "Marks the uploads prefix for the GCS FUSE mount.\n"
 }
 
 # Backend buckets fetch objects anonymously. objectViewer is intentionally

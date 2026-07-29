@@ -53,7 +53,7 @@ install -d -o 33 -g 33 -m 0755 /var/run/wordpress-mysqld
 # the FUSE process; uid/gid 33 present files as www-data, and allow_other lets
 # Apache cross FUSE's default mounting-user boundary. mountpoint makes this
 # safe to repeat without trying to mount over an existing mount.
-install -d -o 33 -g 33 -m 0755 /mnt/wordpress-uploads
+install -d -m 0755 /mnt/wordpress-uploads
 if ! mountpoint --quiet /mnt/wordpress-uploads; then
   gcsfuse \
     --implicit-dirs \

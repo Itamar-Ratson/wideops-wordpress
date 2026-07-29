@@ -310,10 +310,10 @@ UPLOADS_URI=$(terraform -chdir=terraform/main output -raw uploads_uri)
 gcloud storage ls "${UPLOADS_URI}/**" --project="${PROJECT_ID}"
 ```
 
-Finally, record the current VM's numeric ID, recreate it through the managed
-instance group, and wait for the replacement to become healthy. The page and
-new image must still load afterward; the changed ID proves that the page is now
-served by a different instance while the object survived independently:
+Finally, record the current VM's last boot time, recreate it through the managed
+instance group, and wait for the replacement to become healthy. The page and new
+image must still load afterward, which proves the object survived independently
+of the server that wrote it:
 
 ```bash
 VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
@@ -321,14 +321,20 @@ VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
 ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
   --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
 gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
-  --zone="${ZONE}" --format='value(id)'
+  --zone="${ZONE}" --format='value(lastStartTimestamp)'
 gcloud compute instance-groups managed recreate-instances wp-mig \
   --project="${PROJECT_ID}" --region="${REGION}" --instances="${VM}"
 gcloud compute instance-groups managed wait-until wp-mig \
   --project="${PROJECT_ID}" --region="${REGION}" --stable
 gcloud compute instances describe "${VM}" --project="${PROJECT_ID}" \
-  --zone="${ZONE}" --format='value(id)'
+  --zone="${ZONE}" --format='value(lastStartTimestamp)'
 ```
+
+Expected: the boot timestamp advances. Use that rather than the instance ID,
+which `recreate-instances` preserves along with `creationTimestamp` even though
+the disk is rebuilt from the current template. The rebuild also changes the
+host's SSH key, so the next `gcloud compute ssh` prompts about a stale entry in
+`~/.ssh/google_compute_known_hosts`.
 
 ### 6. Tear down
 

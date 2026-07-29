@@ -52,11 +52,12 @@ resource "google_compute_url_map" "wordpress" {
     name            = "wordpress"
     default_service = google_compute_backend_service.wordpress.id
 
+    # Object paths only; the bare prefix names no object. A request for the
+    # directory itself is left to WordPress, which redirects it to the
+    # trailing-slash form that this rule then catches, so listing the bare
+    # prefix here would change nothing.
     path_rule {
-      paths = [
-        "/wp-content/uploads",
-        "/wp-content/uploads/*",
-      ]
+      paths   = ["/wp-content/uploads/*"]
       service = google_compute_backend_bucket.uploads.id
     }
   }
