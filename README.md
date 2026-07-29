@@ -2,8 +2,8 @@
 
 This project packages the supplied WordPress 4.9.4 site without modifying it
 and builds toward a highly available, autoscaling Google Cloud environment.
-The current deployment slice provides one privately networked server backed by
-Cloud SQL. Later slices add the public HTTPS load balancer, durable media,
+The current deployment slice serves one privately networked server through a
+global HTTPS load balancer backed by Cloud SQL. Later slices add durable media,
 autoscaling, autohealing, and a database replica.
 
 ## Prerequisites
@@ -127,7 +127,7 @@ make local-clean
 
 ## Deployment
 
-The deployment starts with these two steps. Neither uses a floating image tag.
+Follow these steps in order. The application image does not use a floating tag.
 
 ### 1. Bootstrap the GCP project
 
@@ -172,7 +172,31 @@ gcloud artifacts docker images list \
 
 Expected: one row whose `TAGS` column contains `v1`.
 
-### 3. Provision the private application stack
+### 3. Create and register the self-signed certificate
+
+```bash
+make certificate
+```
+
+The script generates the certificate and private key under the ignored
+`.certificates/` directory, then registers the public certificate with Compute
+Engine. Terraform only reads the registered certificate as a data source, so
+the private key never enters Terraform configuration or state. The repository's
+deny-all ignore policy and explicit `*.key`/certificate rules prevent the local
+key from being added to version control.
+
+The target is safe to repeat. It checks the project for `wp-self-signed` first
+and leaves both the registered resource and local files unchanged when it
+exists. Confirm the certificate is registered:
+
+```bash
+gcloud compute ssl-certificates describe wp-self-signed \
+  --project="${PROJECT_ID}" --global --format='value(name,type)'
+```
+
+Expected: `wp-self-signed SELF_MANAGED`.
+
+### 4. Provision the public application stack
 
 ```bash
 make infra
@@ -180,9 +204,9 @@ make infra
 
 Allow about 10-15 minutes. Cloud SQL is the slowest resource. The target creates
 the custom network, NAT gateway, private database, dedicated instance identity,
-and a fixed regional instance group containing one `e2-medium` server. The
-main stack reads the project and region from the bootstrap stack's local
-outputs, so those values remain configured in one place.
+fixed regional instance group containing one `e2-medium` server, and global
+load balancer. The main stack reads the project and region from the bootstrap
+stack's local outputs, so those values remain configured in one place.
 
 Confirm that the VM has an internal address and no external address:
 
@@ -224,77 +248,90 @@ startup script is safe to run again: package installation converges, and
 Compose reconciles the running containers against the same declared file rather
 than recreating them.
 
-### 4. Seed the managed database
+### 5. Seed and rewrite the managed database
 
 ```bash
 make seed
 ```
 
-Run this once on the fresh database. `make infra` has already uploaded
-`data/wordpress.sql` to the assets bucket and granted the Cloud SQL instance
-read access to it, so this step is a single control-plane call: the service
-reads the object from Cloud Storage and applies it to the `wordpress`
-database. Nothing connects to the private instance over the network, so no
-bastion, tunnel, or database client is involved.
+Run this once on the fresh database. The first control-plane import loads the
+supplied dump. The second stages `data/rewrite-urls.sql` with the destination
+set to the load balancer's stable HTTPS address and imports it through the same
+Cloud SQL control-plane path. Nothing connects to the private instance over the
+network, and the supplied dump and WordPress tree remain unmodified.
 
-Confirm that WordPress now serves the migrated site. The dump still carries the
-old server's address, so the request has to present that host:
+Confirm HTTPS, the permanent HTTP redirect, the migrated page, the rewrite, and
+an existing PATH_INFO permalink:
 
 ```bash
-VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter='name~^wp- AND status=RUNNING' --format='value(name)' --limit=1)
-ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
-gcloud compute ssh "${VM}" --project="${PROJECT_ID}" --zone="${ZONE}" \
-  --tunnel-through-iap \
-  --command="curl --fail --silent --resolve 104.155.81.48:80:127.0.0.1 \
-    http://104.155.81.48/ | grep -F '<title>Photography Guy'"
+IP=$(terraform -chdir=terraform/main output -raw load_balancer_ip)
+curl --insecure --fail --silent "https://${IP}/" | grep -F '<title>Photography Guy'
+curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}\n' \
+  "http://${IP}/"
+! curl --insecure --fail --silent "https://${IP}/" | grep -F '104.155.81.48'
+curl --insecure --fail --silent \
+  "https://${IP}/index.php/2018/02/07/romanian-autumn/" \
+  | grep -F 'Romanian Autumn'
 ```
 
-Expected: one matching `<title>` line. The old public address is deliberately
-not rewritten in this slice; issue #6 adds the stable load-balancer address and
-performs that rewrite.
+Expected: the title is present, HTTP reports a `301` destination beginning
+with `https://`, the old address search finds nothing, and the existing post
+title is present. Allow several minutes after apply for the backend to report
+healthy:
 
-### 5. Tear down
+```bash
+gcloud compute backend-services get-health wp-backend \
+  --project="${PROJECT_ID}" --global
+```
+
+### 6. Tear down
 
 ```bash
 make destroy
 ```
 
-This destroys the main stack, including the VM, NAT gateway, private peering,
-and Cloud SQL database. The bootstrap APIs and image repository remain so the
-environment can be recreated without repeating the one-time foundation work.
+This destroys the main stack, including the load balancer, VM, NAT gateway,
+private peering, and Cloud SQL database, then deletes the externally managed
+certificate. The ignored local certificate pair remains so `make certificate`
+can register the same pair on a later deployment. The bootstrap APIs and image
+repository remain so the environment can be recreated without repeating the
+one-time foundation work.
 
-## Current architecture
+## Current architecture and request flow
 
 ```text
-Operator
-   |
-   | SSH through Identity-Aware Proxy
-   v
-+---------------------------------------------------+
-| Custom VPC                                        |
-|                                                   |
-|  one subnet                                       |
-|  +---------------------------------------------+  |
-|  | regional MIG: 1 VM                         |  |
-|  | no external IP                             |  |
-|  |                                             |  |
-|  | WordPress -- unix socket ----> SQL proxy   |  |
-|  +--------------------------+------------------+  |
-|              | outbound     | private database    |
-|              v              v path                |
-|          Cloud NAT     service-networking peering |
-+-----------------------------+---------------------+
-                              |
-                              v
-                       Cloud SQL MySQL 8
-                       private IP only
+Public client
+  | HTTP :80
+  +----------------> redirect URL map -- 301 --> HTTPS
+  |
+  | HTTPS :443 (self-signed TLS)
+  v
+global external Application Load Balancer
+  |
+  v
+application URL map
+  |
+  +-- all paths today --> WordPress backend service
+  |                        | TCP health check on :80
+  |                        v
+  |                    regional MIG: 1 VM, no public IP
+  |                        |
+  |                        +-- WordPress -- Unix socket --> SQL proxy
+  |                                                       |
+  |                                                       v private path
+  |                                                  Cloud SQL MySQL 8
+  |
+  +.. /wp-content/uploads/* ..> CDN + bucket backend
+                                  planned in issue #7; not active yet
+
+Operator -- SSH through Identity-Aware Proxy --> regional MIG
+VM outbound package/image traffic ------------> Cloud NAT
 ```
 
-There is no public website endpoint yet. The port-80 firewall rule is restricted
-to Google's published health-check/load-balancer ranges and is ready for issue
-#6; with no load balancer frontend, it creates no public route to the VM.
+The diagram shows both final request backends, with the not-yet-active media
+route dotted and labelled. In this slice the application URL map sends every
+HTTPS path to the WordPress backend. Issue #7 adds the path rule and bucket
+backend without changing either public frontend.
 
 ### Where state lives
 
@@ -326,9 +363,23 @@ application subnet.
 
 Both firewall rules use `google_netblock_ip_ranges` rather than hardcoded
 CIDRs. Port 22 accepts only Identity-Aware Proxy forwarders, and OS Login ties
-the SSH account to the operator's IAM identity. Port 80 accepts only Google's
-published health-check/load-balancer ranges. No rule admits arbitrary internet
-traffic or the whole VPC.
+the SSH account to the operator's IAM identity. Backend port 80 accepts only
+Google's published health-check/load-balancer ranges. Public HTTP and HTTPS
+terminate at the global load balancer; no rule admits arbitrary internet
+traffic to a VM or to the whole VPC.
+
+Port 80 has a redirect-only URL map with no backend service, so it cannot serve
+content. Port 443 terminates TLS and forwards HTTP to Apache. The image maps the
+load balancer's `X-Forwarded-Proto: https` header to Apache's `HTTPS=on`
+environment, allowing unmodified WordPress to issue secure URLs and cookies
+without entering a redirect loop. The certificate is self-signed and named for
+`wideops-wordpress.invalid`, so the browser warning when accessing the stable
+IP is expected. A production deployment would use a real domain and a
+Google-managed, publicly trusted certificate.
+
+The backend health check is TCP on port 80. It verifies that Apache accepts a
+connection without executing PHP or querying Cloud SQL, so a shared database
+incident cannot mark every server unhealthy at once.
 
 The VM runs as `wordpress-vm`, not the project's default service account. It
 has exactly three project roles:
@@ -350,6 +401,20 @@ gcloud logging read \
   --project="${PROJECT_ID}" --limit=10
 ```
 
+### Session management
+
+Session handling was verified against the supplied application rather than
+assumed: a PHP-source search of WordPress core, all supplied plugins, and the
+supplied themes found no calls to `session_start()`, `session_id()`, or
+`$_SESSION`. WordPress 4.9.4 authenticates administrators with cookies signed
+by the salts in the supplied `wp-config.php`. That unchanged file is identical
+on every VM, so any server can validate a cookie issued through any other.
+
+Accordingly, the load-balancer backend configures no session affinity. Affinity
+would hide stateful-server behavior rather than solve it and would add no value
+here. Admin login still uses secure cookies because Apache sees the forwarded
+HTTPS signal described above.
+
 ## Known limitations of this slice
 
 **The database credential is hardcoded.** `Foxtrot01` is fixed in the
@@ -365,6 +430,6 @@ already-supplied database password. [The decisions record](docs/decisions.md)
 describes the migration to a versioned, IAM-restricted Cloud Storage backend.
 
 **This is not the final availability design.** The current group is fixed at
-one server and has no public frontend, durable upload storage, autohealing,
-autoscaling, or read replica. Issues #6-#8 add those capabilities in vertical
-slices without weakening the private network established here.
+one server and still has no durable upload storage, autohealing, autoscaling, or
+read replica. Issues #7-#8 add those capabilities in vertical slices without
+weakening the private network or public HTTPS entry point established here.
