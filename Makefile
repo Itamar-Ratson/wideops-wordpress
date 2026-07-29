@@ -4,10 +4,10 @@
 # those must not be evaluated when an unrelated target runs.
 TF_BOOTSTRAP = terraform -chdir=terraform/bootstrap
 TF_MAIN = terraform -chdir=terraform/main
-LOAD_DURATION ?= 600
-LOAD_CONCURRENCY ?= 50
-LOAD_SAMPLE_INTERVAL ?= 15
-LOAD_SETTLE_TIMEOUT ?= 1200
+
+# Defaults live in the load-test script itself; these only forward an override
+# such as make load-test LOAD_DURATION=900 through to it.
+export LOAD_DURATION LOAD_CONCURRENCY LOAD_SAMPLE_INTERVAL LOAD_SETTLE_TIMEOUT
 
 bootstrap:
 	$(TF_BOOTSTRAP) init
@@ -53,11 +53,7 @@ load-test:
 	  "https://$$($(TF_MAIN) output -raw load_balancer_ip)" \
 	  "$$($(TF_MAIN) output -raw project_id)" \
 	  "$$($(TF_MAIN) output -raw region)" \
-	  "$$($(TF_MAIN) output -raw instance_group_name)" \
-	  "$(LOAD_DURATION)" \
-	  "$(LOAD_CONCURRENCY)" \
-	  "$(LOAD_SAMPLE_INTERVAL)" \
-	  "$(LOAD_SETTLE_TIMEOUT)"
+	  "$$($(TF_MAIN) output -raw instance_group_name)"
 
 destroy:
 	$(TF_MAIN) destroy

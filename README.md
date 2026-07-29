@@ -375,8 +375,8 @@ make load-test
 ```
 
 The defaults run 50 concurrent workers for 600 seconds, sample every 15
-seconds, and then wait up to 1,200 seconds for scale-in. All four values are
-overridable in seconds:
+seconds, and then wait up to 1,200 seconds for scale-in. All four are
+overridable, in seconds apart from the worker count:
 
 ```bash
 make load-test \
