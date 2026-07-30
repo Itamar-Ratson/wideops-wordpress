@@ -5,6 +5,8 @@
 TF_BOOTSTRAP = terraform -chdir=terraform/bootstrap
 TF_MAIN = terraform -chdir=terraform/main
 
+COMPOSE_LOCAL = docker compose --file local/compose.yaml
+
 # Defaults live in the load-test script itself; these only forward an override
 # such as make load-test LOAD_DURATION=900 through to it.
 export LOAD_DURATION LOAD_CONCURRENCY LOAD_SAMPLE_INTERVAL LOAD_SETTLE_TIMEOUT
@@ -55,9 +57,9 @@ destroy:
 	$(TF_MAIN) destroy
 
 local-check: local-clean
-	docker compose up --build --wait
+	$(COMPOSE_LOCAL) up --build --wait
 	@printf '\nThe migrated site is running at http://localhost\n'
-	@printf 'Check it against scripts/local-check.md, then run: make local-clean\n'
+	@printf 'Check it against local/checklist.md, then run: make local-clean\n'
 
 local-clean:
-	docker compose down --volumes --remove-orphans
+	$(COMPOSE_LOCAL) down --volumes --remove-orphans

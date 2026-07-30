@@ -1,5 +1,5 @@
 # Brings the migrated site up locally so it can be checked by hand.
-# See scripts/local-check.md for what to look at once it is running.
+# See checklist.md for what to look at once it is running.
 name: wideops-wordpress-local
 
 services:
@@ -21,9 +21,9 @@ services:
       # so the supplied wp-config.php reaches MySQL through this shared volume
       # rather than over TCP.
       - mysql-socket:/var/run/mysqld
-      - ./data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
-      - ./scripts/rewrite-local-urls.sh:/docker-entrypoint-initdb.d/02-rewrite-urls.sh:ro
-      - ./data/rewrite-urls.sql:/opt/rewrite-urls.sql:ro
+      - ../data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
+      - ./rewrite-urls.sh:/docker-entrypoint-initdb.d/02-rewrite-urls.sh:ro
+      - ../data/rewrite-urls.sql:/opt/rewrite-urls.sql:ro
     healthcheck:
       # The entrypoint imports the dump against a temporary server started with
       # --skip-networking, and that server shares this container's socket. A
@@ -39,12 +39,13 @@ services:
       retries: 45
 
   app:
-    build: ./app
+    build: ../app
     image: wideops-wordpress:local
     ports:
       - "80:80"
     volumes:
       - mysql-socket:/var/run/mysqld
+      - ../app/wp-content/uploads:/var/www/html/wp-content/uploads:ro
     depends_on:
       db:
         condition: service_healthy

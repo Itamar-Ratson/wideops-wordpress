@@ -101,12 +101,14 @@ locally:
 make local-check
 ```
 
-`compose.yaml` starts MySQL and WordPress as two containers, with a named volume
-sharing MySQL's Unix socket between them. PHP gives the literal host `localhost`
-special treatment and uses that socket rather than TCP, so the supplied
-`wp-config.php` connects unmodified. Because the socket is the only path in,
-MySQL publishes no port and binds only its own loopback; the site is the single
-thing exposed to the host, on port 80.
+`local/compose.yaml` starts MySQL and WordPress as two containers, with a
+named volume sharing MySQL's Unix socket between them. PHP gives the literal
+host `localhost` special treatment and uses that socket rather than TCP, so the
+supplied `wp-config.php` connects unmodified. Because the socket is the only
+path in, MySQL publishes no port and binds only its own loopback; the site is
+the single thing exposed to the host, on port 80. Supplied uploads are mounted
+read-only from outside the image, matching the cloud deployment's separation of
+code and media.
 
 The supplied dump and the shared URL rewrite are mounted into MySQL's
 `docker-entrypoint-initdb.d`, so they are applied by the database's own
@@ -117,8 +119,8 @@ re-runnable: it tears the previous run down before bringing a new one up.
 
 The command only brings the site up; the verification is yours to do. Once it
 reports that the site is running, open <http://localhost> and work through
-[`scripts/local-check.md`](scripts/local-check.md), which lists what to look at
-and what each item proves. Remove both containers when you are done:
+[`local/checklist.md`](local/checklist.md), which lists what to look at and
+what each item proves. Remove both containers when you are done:
 
 ```bash
 make local-clean
@@ -158,7 +160,9 @@ make image
 Allow about 5-10 minutes for the first managed build. Cloud Build builds the
 existing `app/Dockerfile` and pushes the result as
 `${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress/wordpress:v1`. The `v1`
-tag is specific and intentionally does not float.
+tag is specific and intentionally does not float. Packaging excludes the
+WordPress source archive, version-disclosing readme and licence files, and the
+uploads tree, so the image contains application code rather than content.
 
 Confirm that the image was published:
 
