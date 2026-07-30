@@ -1,8 +1,8 @@
 # Rendered by Terraform and written to /opt/wordpress/compose.yaml at boot.
-# Deliberately mirrors local/compose.yaml: the supplied
-# wp-config.php pins DB_HOST='localhost', and app/Dockerfile pins
-# mysqli.default_socket, so PHP reaches MySQL through a Unix socket in both
-# environments. Only the service backing that socket differs.
+# Deliberately mirrors local/compose.yaml: the supplied wp-config.php pins
+# DB_HOST='localhost', and app/Dockerfile pins mysqli.default_socket, so PHP
+# reaches MySQL through a Unix socket in both environments. Only the service
+# backing that socket differs.
 name: wideops-wordpress
 
 services:
