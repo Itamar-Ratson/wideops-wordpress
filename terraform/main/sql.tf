@@ -23,9 +23,6 @@ resource "google_sql_database_instance" "wordpress" {
   }
 }
 
-# Reserved for reporting and analytical reads. WordPress is not configured for
-# read/write splitting, so the Auth Proxy addresses only the primary. Replicas
-# cannot hold their own backup schedule; the primary's covers both.
 resource "google_sql_database_instance" "wordpress_replica" {
   name                 = "wp-replica"
   database_version     = "MYSQL_8_0"
@@ -45,8 +42,6 @@ resource "google_sql_database_instance" "wordpress_replica" {
   }
 }
 
-# The name and credential are fixed by the supplied wp-config.php, which this
-# project is not permitted to edit.
 resource "google_sql_database" "wordpress" {
   name      = "wordpress"
   charset   = "utf8mb4"

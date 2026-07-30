@@ -1,16 +1,10 @@
-# Rendered by Terraform and written to /opt/wordpress/compose.yaml at boot.
-# Deliberately mirrors local/compose.yaml: the supplied wp-config.php pins
-# DB_HOST='localhost', and app/Dockerfile pins mysqli.default_socket, so PHP
-# reaches MySQL through a Unix socket in both environments. Only the service
-# backing that socket differs.
 name: wideops-wordpress
 
 services:
   db:
     image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-    # The image is distroless and defaults to uid 65532. Apache's workers run
-    # as www-data (33) and need write access to the socket, so the proxy
-    # creates it as that user instead.
+    # The distroless proxy defaults to uid 65532; run it as www-data so Apache
+    # can use the Unix socket it creates.
     user: "33:33"
     command:
       - "--private-ip"
@@ -25,17 +19,10 @@ services:
       - "80:80"
     volumes:
       - /var/run/wordpress-mysqld:/var/run/mysqld
-      # GCS FUSE is on the host write path only. Public reads are routed by the
-      # load balancer straight to the bucket backend.
       - /mnt/wordpress-uploads:/var/www/html/wp-content/uploads
-    # Ordering only. The proxy is distroless, so it cannot run a healthcheck of
-    # its own; the app's healthcheck below is the condition that `docker compose
-    # up --wait` blocks on.
     depends_on:
       - db
     healthcheck:
-      # Proves only that Apache serves. PHP emits warning output before
-      # WordPress can send its own 500, so a stopped proxy still returns 200.
       test:
         ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
       interval: 2s

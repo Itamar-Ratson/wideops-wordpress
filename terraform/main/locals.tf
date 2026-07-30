@@ -11,14 +11,10 @@ locals {
   region        = data.terraform_remote_state.bootstrap.outputs.region
   repository_id = data.terraform_remote_state.bootstrap.outputs.repository_id
 
-  # A new instance installs packages, pulls both containers, mounts the uploads
-  # bucket, and passes Compose health within this window. Autohealing must not
-  # judge it unhealthy before then, and the autoscaler must not read its boot
-  # CPU as visitor demand, so both wait the same period.
+  # Shared by autohealing and autoscaling; shorter values misclassify boot time
+  # as either an unhealthy instance or visitor-driven CPU load.
   instance_warmup_seconds = 600
 
-  # Reserved-invalid host: the load balancer is reached by IP, so no name would
-  # match and the browser warns regardless.
   certificate_hostname = "wideops-wordpress.invalid"
 
   artifact_registry_host = "${local.region}-docker.pkg.dev"

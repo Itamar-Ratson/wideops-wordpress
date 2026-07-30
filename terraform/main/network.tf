@@ -33,9 +33,6 @@ resource "google_compute_router_nat" "wordpress" {
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
-# Google publishes one netblock covering both health-check probes and global
-# external load-balancer proxies, so this single rule admits all legitimate
-# backend traffic. Nothing else on the internet can reach port 80 on a VM.
 resource "google_compute_firewall" "allow_load_balancer" {
   name    = "wp-allow-lb"
   network = google_compute_network.wordpress.name
