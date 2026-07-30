@@ -1,359 +1,121 @@
 # Highly Available WordPress on GCP
 
-This project packages the supplied WordPress 4.9.4 site without modifying it
-and runs it in a highly available, autoscaling Google Cloud environment. A
-regional managed instance group keeps two to five privately networked servers
-behind a global HTTPS load balancer, Cloud SQL holds relational data and a read
-replica, and Cloud Storage serves shared media through Cloud CDN.
+This repository packages the supplied WordPress 4.9.4 site unchanged and runs it on a private regional managed
+instance group behind a global HTTPS load balancer. Cloud SQL stores data; Cloud Storage and Cloud CDN share media.
 
 ## Prerequisites
 
-Before starting, install:
-
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`)
-- [Terraform](https://developer.hashicorp.com/terraform/install) 1.5 or later
-- [Docker](https://docs.docker.com/engine/install/)
-
-You also need a Google account that can create projects and link them to an
-open billing account. Authenticate both the `gcloud` CLI and Terraform:
+Install [Google Cloud CLI](https://cloud.google.com/sdk/docs/install), [Terraform](https://developer.hashicorp.com/terraform/install)
+1.5 or later, and [Docker](https://docs.docker.com/engine/install/). Use an account that can create projects and link billing:
 
 ```bash
 gcloud auth login
 gcloud auth application-default login
 ```
 
-Run every command below from the repository root.
+Run the remaining commands from the repository root.
 
-## Create and configure the project
+## Create the project
 
-The project ID and region are declared as variable defaults in
-`terraform/bootstrap/variables.tf`. Terraform reads them from there with no
-flags, so retargeting the deployment starts by changing those two defaults.
-
-The region is assumed to offer `e2-medium`, the shared-core `db-g1-small`
-database tier, and Artifact Registry. If you change it, confirm all three before
-deploying.
-
-The project-creation steps below run before Terraform does, so set the same two
-values in your shell for them:
+The defaults are `wideops-wordpress` and `europe-north2` in `terraform/bootstrap/variables.tf`. To retarget,
+also change the image destination in `Makefile`; the region must offer `e2-medium`, `db-g1-small`, and Artifact Registry.
 
 ```bash
 export PROJECT_ID=wideops-wordpress
 export REGION=europe-north2
-```
-
-Create the project once. The display name and globally unique project ID both
-come from `PROJECT_ID`:
-
-```bash
 gcloud projects create "${PROJECT_ID}" --name="${PROJECT_ID}"
-```
-
-If the project already exists under your account, skip that command. If Google
-reports that the ID belongs to someone else, choose another globally unique ID,
-update it in `terraform/bootstrap/variables.tf` and in the `image` target of the
-`Makefile`, re-export `PROJECT_ID`, and retry.
-
-List the open billing accounts available to your user:
-
-```bash
 gcloud billing accounts list --filter='open=true'
-```
-
-Copy the required account ID from the `ACCOUNT_ID` column, then link it to the
-new project:
-
-```bash
-export BILLING_ACCOUNT_ID="replace-with-account-id"
-gcloud billing projects link "${PROJECT_ID}" \
-  --billing-account="${BILLING_ACCOUNT_ID}"
-```
-
-Make the new project the default for interactive commands and for Application
-Default Credentials. Terraform receives its project explicitly, but aligning
-these defaults prevents quota warnings and accidental commands against another
-project:
-
-```bash
+export BILLING_ACCOUNT_ID=replace-with-account-id
+gcloud billing projects link "${PROJECT_ID}" --billing-account="${BILLING_ACCOUNT_ID}"
 gcloud config set project "${PROJECT_ID}"
 gcloud auth application-default set-quota-project "${PROJECT_ID}"
 ```
 
-Confirm that the project is active and billing is enabled:
+Skip project creation if it already exists. Project IDs are global; change a different ID in both places named above.
 
-```bash
-gcloud projects describe "${PROJECT_ID}" \
-  --format='value(projectId,lifecycleState)'
-gcloud billing projects describe "${PROJECT_ID}" \
-  --format='value(billingEnabled)'
-```
+## Rehearse locally
 
-Expected: the configured project ID followed by `ACTIVE`, then `True`.
+Run `make local-check`, open <http://localhost>, and follow [`local/checklist.md`](local/checklist.md).
+It builds the real image without GCP. Run `make local-clean` afterward; each check starts with a fresh database.
 
-## Pre-deployment check
+## Deploy
 
-Before creating cloud infrastructure, build and run the real migrated site
-locally:
+The two stacks encode the order: APIs and repository, then image, then the instance group.
 
-```bash
-make local-check
-```
-
-`local/compose.yaml` starts MySQL and WordPress as two containers, with a
-named volume sharing MySQL's Unix socket between them. PHP gives the literal
-host `localhost` special treatment and uses that socket rather than TCP, so the
-supplied `wp-config.php` connects unmodified. Because the socket is the only
-path in, MySQL publishes no port and binds only its own loopback; the site is
-the single thing exposed to the host, on port 80. Supplied uploads are mounted
-read-only from outside the image, matching the cloud deployment's separation of
-code and media.
-
-The supplied dump and the shared URL rewrite are mounted into MySQL's
-`docker-entrypoint-initdb.d`, so they are applied by the database's own
-first-run initialisation rather than by an external script. WordPress waits on a
-MySQL health check that connects over TCP, which the initialising server does not
-serve — so the site never starts against a half-imported database. The target is
-re-runnable: it tears the previous run down before bringing a new one up.
-
-The command only brings the site up; the verification is yours to do. Once it
-reports that the site is running, open <http://localhost> and work through
-[`local/checklist.md`](local/checklist.md), which lists what to look at and
-what each item proves. Remove both containers when you are done:
-
-```bash
-make local-clean
-```
-
-## Deployment
-
-Follow these steps in order. The application image does not use a floating tag.
-
-### 1. Bootstrap the GCP project
+### 1. Create the foundation
 
 ```bash
 make bootstrap
 ```
 
-Allow about 3-5 minutes in a fresh project. The target enables the APIs declared
-by the bootstrap stack, creates the regional Docker repository, and grants the
-build identity permission to push images and write build logs.
+This enables APIs, creates the Docker repository, and lets Cloud Build push images and logs. Allow 3–5 minutes.
 
-Confirm that the repository exists and is a Docker repository:
-
-```bash
-gcloud artifacts repositories describe wordpress \
-  --project="${PROJECT_ID}" --location="${REGION}" \
-  --format='value(name,format)'
-```
-
-Expected: a repository path followed by `DOCKER`. Destroying the bootstrap stack
-does not disable project APIs.
-
-### 2. Build and publish the application image
+### 2. Build and publish WordPress
 
 ```bash
 make image
 ```
 
-Allow about 5-10 minutes for the first managed build. Cloud Build builds the
-existing `app/Dockerfile` and pushes the result as
-`${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress/wordpress:v1`. The `v1`
-tag is specific and intentionally does not float. Packaging excludes the
-WordPress source archive, version-disclosing readme and licence files, and the
-uploads tree, so the image contains application code rather than content.
+Cloud Build publishes immutable `wordpress:v1`. Packaging excludes archives, version files, and uploads, so the
+image contains code rather than content. Allow 5–10 minutes.
 
-Confirm that the image was published:
-
-```bash
-gcloud artifacts docker images list \
-  "${REGION}-docker.pkg.dev/${PROJECT_ID}/wordpress" \
-  --project="${PROJECT_ID}" --include-tags --filter='tags:v1' \
-  --format='table(package,tags,createTime)'
-```
-
-Expected: one row whose `TAGS` column contains `v1`.
-
-### 3. Provision the public application stack
+### 3. Provision the application stack
 
 ```bash
 make infra
 ```
 
-Allow about 15-20 minutes. Cloud SQL and its read replica are the slowest
-resources. The target creates the custom network, NAT gateway, private primary
-and replica databases, dedicated instance identity, private seed and public
-uploads buckets, regional instance group containing at least two `e2-medium`
-servers, and global load balancer with a CDN-enabled bucket backend and
-self-signed TLS certificate. Terraform generates the certificate and key as
-part of this apply. The main stack reads the project and region from the
-bootstrap stack's local outputs, so those values remain configured in one
-place.
+Allow 15–20 minutes for private databases, network, buckets, the 2–5-instance regional group, load balancer, and
+Terraform-generated certificate. Each VM installs Docker/GCS FUSE and starts WordPress with the Cloud SQL Auth Proxy.
 
-Confirm that the VM has an internal address and no external address:
-
-```bash
-gcloud compute instances list \
-  --project="${PROJECT_ID}" --filter='name~^wp-' \
-  --format='table(name,networkInterfaces[0].networkIP,networkInterfaces[0].accessConfigs[0].natIP)'
-```
-
-The final column must be empty. Confirm that Cloud SQL has only a private
-address:
-
-```bash
-gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
-  --format='table(ipAddresses[].type,ipAddresses[].ipAddress)'
-```
-
-Expected: a `PRIVATE` row and no `PRIMARY` public address.
-
-Confirm the replica follows that private primary, and that the primary has the
-stream source a replica needs:
-
-```bash
-gcloud sql instances describe wp-replica --project="${PROJECT_ID}" \
-  --format='value(masterInstanceName,ipAddresses[0].type)'
-gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
-  --format='value(settings.backupConfiguration.enabled,settings.backupConfiguration.binaryLogEnabled)'
-```
-
-Expected: the first command names `wp-primary` and reports `PRIVATE`; the
-second prints `True True`. WordPress's rendered proxy command still contains
-only the primary's connection name. The replica is deliberately reserved for
-reporting or analytical reads rather than application-level read/write
-splitting.
-
-Confirm the autoscaler policy, autohealing delay, and regional distribution:
-
-```bash
-gcloud compute instance-groups managed describe wp-mig \
-  --project="${PROJECT_ID}" --region="${REGION}" \
-  --format='yaml(autoscaler.autoscalingPolicy,autoHealingPolicies,distributionPolicy.zones)'
-```
-
-Expected: a floor of `2`, ceiling of `5`, CPU target of `0.6`, and a
-600-second initialization period. The group lists multiple zones and uses
-`wp-tcp-health` for healing with the same 600-second initial delay.
-
-The first boot installs Docker and GCS FUSE, authenticates to Artifact Registry
-with a short-lived metadata-server token, mounts only the uploads prefix, writes
-a Terraform-rendered `/opt/wordpress/compose.yaml`, and brings it up. That file
-mirrors the local one: the Cloud SQL Auth Proxy takes MySQL's place as the
-service backing the shared Unix socket, while the host mount takes the place of
-the image's uploads directory. WordPress itself is unchanged. Check it through
-IAP:
-
-```bash
-VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter='name~^wp-' --format='value(name)' --limit=1)
-ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
-gcloud compute ssh "${VM}" --project="${PROJECT_ID}" --zone="${ZONE}" \
-  --tunnel-through-iap \
-  --command='findmnt /mnt/wordpress-uploads; sudo journalctl -u google-startup-scripts.service -n 50; sudo docker ps'
-```
-
-Expected: the uploads path reports `fuse.gcsfuse`, and the `db` and `app`
-containers are running, with `app` healthy. On each boot, package installation
-converges, the bucket remounts, and Compose reconciles the running containers
-against the same declared file.
-
-### 4. Seed and rewrite the managed database
+### 4. Seed the site
 
 ```bash
 make seed
 ```
 
-Run this once on the fresh database. It first syncs the supplied
-`app/wp-content/uploads` tree to the uploads bucket under that same
-`wp-content/uploads` path, so stored object names match browser paths without
-rewriting. The first control-plane import then loads the supplied dump. The
-second stages `data/rewrite-urls.sql` with the destination set to the load
-balancer's stable HTTPS address and imports it through the same Cloud SQL
-control-plane path. Nothing connects to the private instance over the network,
-and the supplied dump and WordPress tree remain unmodified.
+Run once on a fresh database. It syncs uploads to their browser paths, then imports the dump and public-URL rewrite
+through the Cloud SQL control plane. No bastion or database network path is needed. Allow time for backend health.
 
-Confirm HTTPS, the permanent HTTP redirect, the migrated page, the rewrite, and
-an existing PATH_INFO permalink:
+### Verify the deployed requirements
+
+1. HTTPS serves the migrated title (the self-signed certificate requires `--insecure`):
 
 ```bash
 URL=$(terraform -chdir=terraform/main output -raw wordpress_url)
 curl --insecure --fail --silent "${URL}/" | grep -F '<title>Photography Guy'
-curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}\n' \
-  "${URL/https:/http:}/"
-! curl --insecure --fail --silent "${URL}/" | grep -F '104.155.81.48'
-curl --insecure --fail --silent \
-  "${URL}/index.php/2018/02/07/romanian-autumn/" \
-  | grep -F 'Romanian Autumn'
 ```
 
-Expected: the title is present, HTTP reports a `301` destination beginning
-with `https://`, the old address search finds nothing, and the existing post
-title is present. Allow several minutes after apply for the backend to report
-healthy:
+The output contains `<title>Photography Guy`; failure or an empty match is not a pass.
+
+2. Every managed instance has an internal address and no external address:
 
 ```bash
-gcloud compute backend-services get-health wp-backend \
-  --project="${PROJECT_ID}" --global
+gcloud compute instances list --project="${PROJECT_ID}" --filter='name~^wp-' \
+  --format='table(name,networkInterfaces[0].networkIP,networkInterfaces[0].accessConfigs[0].natIP)'
 ```
 
-Confirm that an existing media request goes to Cloud Storage rather than
-Apache. Storage-provider headers such as `x-goog-generation` and
-`x-goog-storage-class` prove which backend answered:
+The final address column is empty for every `wp-` instance.
+
+3. The database is private and the replica follows the primary:
 
 ```bash
-URL=$(terraform -chdir=terraform/main output -raw wordpress_url)
-curl --insecure --silent --head \
-  "${URL}/wp-content/uploads/2018/02/IMG_6056.jpg" \
-  | grep --ignore-case '^x-goog-'
+gcloud sql instances describe wp-primary --project="${PROJECT_ID}" \
+  --format='value(ipAddresses[].type)'
+gcloud sql instances describe wp-replica --project="${PROJECT_ID}" \
+  --format='value(masterInstanceName,ipAddresses[].type)'
 ```
 
-For an end-to-end write check, log in at `${URL}/wp-admin/`, upload a
-uniquely named image, and place it on a page. Its public URL must load and the
-object must appear beneath the bucket prefix:
+The primary reports only `PRIVATE`; the replica reports `<project-id>:wp-primary` and `PRIVATE`.
 
-```bash
-UPLOADS_URI=$(terraform -chdir=terraform/main output -raw uploads_uri)
-gcloud storage ls "${UPLOADS_URI}/**" --project="${PROJECT_ID}"
-```
-
-Finally, delete one VM directly and wait for the managed instance group to
-restore its floor. The page and new image must stay available while the group
-returns to two, which proves both automatic replacement and that the object
-survived independently of the server that wrote it:
-
-```bash
-VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter='name~^wp-' --format='value(name)' --limit=1)
-ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
-  --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
-gcloud compute instances delete "${VM}" --project="${PROJECT_ID}" \
-  --zone="${ZONE}" --quiet
-gcloud compute instance-groups managed wait-until wp-mig \
-  --project="${PROJECT_ID}" --region="${REGION}" --stable
-gcloud compute instance-groups managed list-instances wp-mig \
-  --project="${PROJECT_ID}" --region="${REGION}" \
-  --format='table(instance.basename(),instanceStatus,instanceHealth[0].detailedHealthState)'
-```
-
-Expected: the table returns to two `RUNNING` instances without intervention.
-The replacement's startup script rebuilds the whole runtime from the current
-template; no useful state was present on the deleted boot disk.
-
-### 5. Demonstrate autoscaling and availability
-
-Run the load demonstration after seeding, when the homepage executes real PHP
-and database work. Requests for its images bypass the VM through the bucket
-backend, so the CPU signal measures application work rather than JPEG delivery:
+### 5. Demonstrate autoscaling
 
 ```bash
 make load-test
 ```
 
-The script runs 50 concurrent `curl` workers for 600 seconds and prints the
-autoscaler's target size plus an independent HTTP status every 15 seconds. A
-captured run grew from the two-instance floor to the five-instance ceiling
-while the site kept returning HTTP 200:
+Fifty `curl` workers drive PHP/database work for 600 seconds while the script samples target size and HTTP status.
+Media bypasses the VMs, keeping the CPU signal representative. A captured run reached five while staying online:
 
 ```text
 Driving https://203.0.113.10 with 50 workers for 600s.
@@ -363,31 +125,12 @@ Driving https://203.0.113.10 with 50 workers for 600s.
 2026-07-29T08:06:02Z target=5 http=200
 ```
 
-After the script stops, keep rerunning the
-`gcloud compute instance-groups managed describe` command until the target
-returns to two; the captured run did so at 08:22:05Z while the group drained
-its surplus instances.
+The target returned to two at 08:22:05Z while the group drained surplus instances.
 
 ### 6. Tear down
 
-```bash
-make destroy
-```
-
-This destroys the main stack, including the load balancer, VMs, NAT gateway,
-private peering, Cloud SQL primary and replica, and both buckets. The uploads
-bucket uses `force_destroy`, so its media is deleted with the stack. The TLS
-certificate is removed with the stack. Only the bootstrap APIs and image
-repository remain, so a later `make infra` rebuilds the stack without repeating
-any of the one-time foundation work.
-
-Expect the private peering to need a second pass. Cloud SQL's tenant project
-keeps the `servicenetworking-googleapis-com` peering attached after the
-instances themselves are gone, and Terraform cannot force it, so the run stops
-with `Failed to delete connection; Producer services (e.g. CloudSQL, Cloud
-Memstore, etc.) are still using this connection` and leaves the network, its
-reserved range, and the connection behind. Waiting does not clear it. Delete
-the peering directly, then run the target again:
+Run `make destroy`; it also removes media. Cloud SQL's tenant project can retain its peering after instance deletion,
+so the first destroy fails. Waiting does not help: delete the peering, then run `make destroy` again.
 
 ```bash
 gcloud compute networks peerings delete servicenetworking-googleapis-com \
@@ -395,12 +138,9 @@ gcloud compute networks peerings delete servicenetworking-googleapis-com \
 make destroy
 ```
 
-Setting `deletion_policy = "ABANDON"` on the connection is not a fix. It skips
-the failing call, but Compute Engine then refuses to delete a network that
-still carries a peering, so the same run fails one resource later and leaves
-the peering behind silently.
+`deletion_policy = "ABANDON"` merely moves failure to network deletion while silently leaving the peering.
 
-## Current architecture and request flow
+## Architecture and request flow
 
 ```text
 Public client
@@ -432,167 +172,41 @@ Operator -- SSH through Identity-Aware Proxy --> regional MIG
 VM outbound package/image traffic ------------> Cloud NAT
 ```
 
-The application URL map chooses between two backends without changing either
-public frontend. Dynamic requests reach WordPress; upload reads go directly to
-the CDN-backed bucket and never consume VM, Apache, or PHP capacity.
+Dynamic requests reach WordPress; uploads go to the CDN-backed bucket. A TCP health check avoids coupling VM health
+to the database. A 600-second warmup protects slow boot and excludes boot CPU; above 60%, the group grows 2–5.
 
-### Where state lives
+### State and storage
 
-- Application code is baked into the immutable `wordpress:v1` image. Its
-  supplied uploads are seed input only; the runtime uploads directory is a GCS
-  FUSE mount backed by the uploads bucket.
-- The private assets bucket holds the supplied database dump so Cloud SQL can
-  import it without a network path to the instance. It has uniform bucket-level
-  access, enforced public access prevention, and object read for only the Cloud
-  SQL instance's own identity.
-- The separate uploads bucket holds supplied and newly uploaded media at
-  `wp-content/uploads/...`. It is durable across VM replacement and shared by
-  every instance.
-- Relational data lives in the Cloud SQL primary, not on a VM disk, and streams
-  through binary logs to a read replica. Automated primary backups provide a
-  recovery path. The Cloud SQL Auth Proxy exposes only the primary as a Unix
-  socket shared with the WordPress container, so the supplied
-  `DB_HOST='localhost'` resolves the same way it does locally.
-- The VM boot disk contains only replaceable runtime files, container layers,
-  and logs.
-- Terraform resource state is local in each stack and excluded from version
-  control. The main stack reads only the bootstrap stack's non-secret project,
-  region, and repository outputs.
+Code is immutable in `wordpress:v1`; VM disks are replaceable. The backed-up private Cloud SQL primary streams to
+a read replica reserved for reporting, while WordPress uses only the primary.
 
-### Media storage and delivery
+The Auth Proxy exposes a Unix socket, preserving `DB_HOST='localhost'`. A private assets bucket supplies seed data.
+GCS FUSE mounts a separate uploads bucket over WordPress's upload path; public reads bypass PHP through Cloud CDN.
 
-GCS FUSE is intentionally only on the write path. During boot, root mounts the
-uploads bucket's `wp-content/uploads` prefix at
-`/mnt/wordpress-uploads`; Compose bind-mounts that directory over WordPress's
-normal `/var/www/html/wp-content/uploads` path. The mount presents objects as
-uid and gid 33 (`www-data`) and uses `allow_other`, because FUSE otherwise
-allows only the root user that created the mount to enter it. WordPress can
-therefore create originals and thumbnails without application changes.
+The VM identity has bucket-scoped `roles/storage.objectUser`. Public `roles/storage.objectViewer` also permits
+listing, so media is deliberately enumerable: it contains only public-site files, while the dump stays private.
 
-The load balancer sends every public `/wp-content/uploads/*` request to a
-CDN-enabled backend bucket. It does not read the host mount, start Apache, or
-execute PHP. Besides avoiding needless compute cost, that keeps the CPU signal
-used by the later autoscaler representative of application work.
+Terraform state is deliberately local and gitignored for one operator, despite containing the database password and
+TLS key. The first team change would be versioned, IAM-restricted Cloud Storage backends for locking and recovery.
 
-Backend buckets fetch anonymously, so `allUsers` receives
-`roles/storage.objectViewer` on the uploads bucket. That built-in role also
-permits object listing: the bucket is deliberately public and enumerable. This
-is acceptable here because it contains only media already published by the
-site; the private SQL dump remains in a different bucket. Signed URLs were
-rejected because they would require WordPress to generate them. Keeping the
-bucket private was also rejected because it would force reads back through GCS
-FUSE and the servers, defeating the CDN design. The preferred future tightening
-is a custom bucket role containing object-read but not object-list permission;
-the built-in read-only alternative was not selected because its name is
-`legacy`-prefixed.
+### Sessions
 
-The instance identity receives `roles/storage.objectUser` on this bucket
-itself, not on the project. It can create, update, and delete WordPress media but
-cannot use that grant to reach any other project storage.
+No sticky sessions are configured. The supplied code makes no PHP session calls; fixed `wp-config.php` salts sign
+WordPress cookies identically on every VM. Any instance can validate a login, while affinity would conceal local state.
 
 ### Networking and security
 
-The VPC is custom mode, so it creates exactly one subnet and no surprise
-subnets in other regions. The VM has no external IP. Its outbound package and
-container downloads use Cloud NAT, while Private Google Access keeps Google API
-traffic on Google's network. Cloud SQL has no public IP and receives its private
-address from a separately reserved peering range; it does not occupy the
-application subnet.
+The custom VPC has one subnet. VMs use Cloud NAT, not external IPs; Private Google Access carries API traffic. Cloud
+SQL is private. Port 80 accepts only Google's published proxy/health ranges; SSH is IAP-only with OS Login. The public
+port-80 map contains only an HTTPS redirect, with no content backend.
 
-Both firewall rules use `google_netblock_ip_ranges` rather than hardcoded
-CIDRs. Port 22 accepts only Identity-Aware Proxy forwarders, and OS Login ties
-the SSH account to the operator's IAM identity. Backend port 80 accepts only
-Google's published health-check/load-balancer ranges. Public HTTP and HTTPS
-terminate at the global load balancer; no rule admits arbitrary internet
-traffic to a VM or to the whole VPC.
-
-Port 80 has a redirect-only URL map with no backend service, so it cannot serve
-content. Port 443 terminates TLS and forwards HTTP to Apache. The image maps the
-load balancer's `X-Forwarded-Proto: https` header to Apache's `HTTPS=on`
-environment, allowing unmodified WordPress to issue secure URLs and cookies
-without entering a redirect loop. The certificate is self-signed and named for
-`wideops-wordpress.invalid`, so the browser warning when accessing the stable
-load-balancer IP is expected. Terraform renews it 30 days before expiry;
-`name_prefix` and create-before-destroy let the proxy move to the replacement
-before the old certificate is removed. A production deployment would use a
-real domain and a Google-managed, publicly trusted certificate, so its private
-key would never exist on our side.
-
-The backend health check is TCP on port 80. It verifies that Apache accepts a
-connection without executing PHP or querying Cloud SQL, so a shared database
-incident cannot mark every server unhealthy at once.
-
-That same check drives autohealing. A new VM gets 600 seconds to install its
-packages, pull the two containers, mount the uploads bucket, and pass Compose
-health before the manager may judge it unhealthy. The autoscaler also ignores
-a new VM's boot CPU for 600 seconds, preventing scale-out from mistaking package
-installation for visitor demand. After that window, average CPU above the 60%
-target grows the regional group as far as five; falling demand returns it to a
-floor of two. A regional group distributes those instances across zones, so a
-single VM or zone loss leaves capacity for the load balancer while replacement
-occurs.
-
-The VM runs as `wordpress-vm`, not the project's default service account. It
-has exactly two project roles:
-
-- `roles/cloudsql.client` lets the proxy authenticate the workload before it
-  opens a private database tunnel.
-- `roles/artifactregistry.reader` lets Docker pull the published image.
-
-The broad `cloud-platform` OAuth scope does not add permissions; IAM still
-limits the identity to those two roles, plus the uploads bucket-scoped object
-grant described above. No service-account key is created. The database,
-persistent disks, and buckets use Google-managed encryption at rest.
-
-### Session management
-
-Session handling was verified against the supplied application rather than
-assumed: a PHP-source search of WordPress core, all supplied plugins, and the
-supplied themes found no calls to `session_start()`, `session_id()`, or
-`$_SESSION`. WordPress 4.9.4 authenticates administrators with cookies signed
-by the salts in the supplied `wp-config.php`. That unchanged file is identical
-on every VM, so any server can validate a cookie issued through any other.
-
-Accordingly, the load-balancer backend configures no session affinity. Affinity
-would hide stateful-server behavior rather than solve it and would add no value
-here. Admin login still uses secure cookies because Apache sees the forwarded
-HTTPS signal described above.
+The VM identity has only `cloudsql.client` and `artifactregistry.reader` at project scope, plus its bucket grant.
+No key exists. TLS terminates at the balancer; forwarded HTTPS makes unmodified WordPress emit secure URLs and cookies.
 
 ## Known limitations
 
-**The database credential is hardcoded.** `Foxtrot01` is fixed in the
-supplied `wp-config.php`, which may not be edited, and therefore also appears
-in Terraform state. Secret Manager would not remove it from the shipped
-application. The compensating controls are a database with no public address
-and an IAM-authenticated proxy reached only from the private VM. Rotating the
-credential would be the first step in a real engagement.
-
-**Terraform state is local and secret-bearing.** State files are excluded from
-version control and contain both the supplied database password and the
-generated self-signed TLS key. The key was previously an unencrypted, ignored
-file readable by the same user on the same machine, so moving it into ignored
-local state crosses no new trust boundary. It protects only a `.invalid` demo
-hostname trusted by nothing. A team deployment would move state to a versioned,
-IAM-restricted Cloud Storage backend. Secret Manager is not the production
-answer for the TLS key: a real domain would use a Google-managed certificate,
-so the key would never be possessed here.
-
-## Deferred improvements
-
-- **Remote Terraform state:** move both stacks to versioned, IAM-restricted GCS
-  backends before multiple operators collaborate; local state keeps this demo's
-  bootstrap linear.
-- **Terraform-managed image build:** moving it into the graph would add a second
-  provider for an image whose source is fixed.
-- **Keyless CI/CD:** use GitHub Actions with Workload Identity Federation for
-  pull-request plans and merge-time applies; it is deferred because this
-  assignment asks for an explicit, explainable manual deployment sequence.
-- **Pre-baked machine images:** install Docker and GCS FUSE with Packer to
-  shorten scale-out by one to two minutes; startup remains scripted
-  here so every dependency is visible in one place.
-- **Object caching:** add Redis only when application demand justifies its cost;
-  it needs a WordPress drop-in, adds roughly $36/month, and would suppress the
-  CPU signal used by this autoscaling demonstration.
-- **Rotate the database credential:** replace `Foxtrot01` and store the new
-  credential in Secret Manager in a real engagement; it is deferred because
-  the supplied, immutable `wp-config.php` hardcodes the current value.
+- The certificate is self-signed for `.invalid`, so browsers warn; production needs a domain and managed certificate.
+- `Foxtrot01` is fixed in supplied `wp-config.php` and state; private SQL plus its IAM proxy are compensating controls.
+- Local state fits only this single-operator demo; team use needs the remote backend above.
+- `make seed` is intentionally a one-time operation for a fresh database.
+- VM boot installs packages and takes minutes; production could use a pre-baked image.
