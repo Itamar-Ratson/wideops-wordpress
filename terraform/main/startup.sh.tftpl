@@ -1,6 +1,4 @@
 #!/bin/bash
-# shellcheck disable=SC1091,SC2154
-# The base image supplies /etc/os-release; Terraform renders template variables.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -8,8 +6,6 @@ apt-get update -qq
 apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg
 systemctl enable --now docker
 
-# GCS FUSE is installed from Google's signed apt repository. Rewriting the
-# source and key is safe to repeat on every boot.
 . /etc/os-release
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
   | gpg --dearmor --yes --output /usr/share/keyrings/cloud.google.gpg
@@ -18,8 +14,6 @@ printf 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cl
 apt-get update -qq
 apt-get install -y -qq gcsfuse
 
-# Authenticate Docker with a short-lived token issued to this VM's service
-# account. This avoids assuming that gcloud is installed on the base image.
 TOKEN="$(curl -fsS \
   -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
@@ -30,16 +24,10 @@ printf '%s' "$TOKEN" | docker login \
   "https://${artifact_registry_host}"
 unset TOKEN
 
-# The proxy writes the socket here as uid 33, so the directory must already be
-# owned by it. This lives on tmpfs and is recreated on every boot, which is
-# what a socket directory should do.
 install -d -o 33 -g 33 -m 0755 /var/run/wordpress-mysqld
 
-# The bucket stores objects under the same wp-content/uploads prefix used by
-# public URLs, but only that prefix is exposed inside the container. Root owns
-# the FUSE process; uid/gid 33 present files as www-data, and allow_other lets
-# Apache cross FUSE's default mounting-user boundary.
 install -d -m 0755 /mnt/wordpress-uploads
+# Keep allow_other: Apache cannot cross GCS FUSE mounting-user boundary without it.
 gcsfuse \
   --implicit-dirs \
   --only-dir wp-content/uploads \
@@ -54,7 +42,4 @@ cat > /opt/wordpress/compose.yaml <<'COMPOSE'
 ${compose_file}
 COMPOSE
 
-# Compose converges on the declared state, so a boot that finds containers
-# already restarted needs no teardown step first. --wait blocks until the app
-# healthcheck passes.
 docker compose --file /opt/wordpress/compose.yaml up --detach --wait

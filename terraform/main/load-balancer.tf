@@ -3,8 +3,6 @@ resource "tls_private_key" "wordpress" {
   rsa_bits  = 2048
 }
 
-# Valid for a year and reissued 30 days out, so a stack that is applied at
-# least monthly never serves an expired certificate.
 resource "tls_self_signed_cert" "wordpress" {
   private_key_pem       = tls_private_key.wordpress.private_key_pem
   validity_period_hours = 24 * 365
@@ -17,10 +15,6 @@ resource "tls_self_signed_cert" "wordpress" {
   }
 }
 
-# Compute Engine certificates are immutable, so renewal is a replacement. A
-# generated name plus create-before-destroy lets the HTTPS proxy move to the
-# new certificate first; Compute Engine refuses to delete one that a proxy
-# still references.
 resource "google_compute_ssl_certificate" "wordpress" {
   name_prefix = "wp-self-signed-"
   certificate = tls_self_signed_cert.wordpress.cert_pem
@@ -35,8 +29,7 @@ resource "google_compute_global_address" "wordpress" {
   name = "wp-public-ip"
 }
 
-# A TCP probe proves that Apache is accepting connections without executing
-# PHP or coupling every server's health to the shared database.
+# Keep this TCP-only: probing PHP would turn a database outage into VM churn.
 resource "google_compute_health_check" "wordpress" {
   name                = "wp-tcp-health"
   check_interval_sec  = 5
@@ -81,10 +74,6 @@ resource "google_compute_url_map" "wordpress" {
     name            = "wordpress"
     default_service = google_compute_backend_service.wordpress.id
 
-    # Object paths only; the bare prefix names no object. A request for the
-    # directory itself is left to WordPress, which redirects it to the
-    # trailing-slash form that this rule then catches, so listing the bare
-    # prefix here would change nothing.
     path_rule {
       paths   = ["/wp-content/uploads/*"]
       service = google_compute_backend_bucket.uploads.id
@@ -106,8 +95,6 @@ resource "google_compute_global_forwarding_rule" "https" {
   target                = google_compute_target_https_proxy.wordpress.id
 }
 
-# Port 80 has its own URL map and can only issue a permanent HTTPS redirect;
-# it has no backend service from which it could serve unencrypted content.
 resource "google_compute_url_map" "http_redirect" {
   name = "wp-http-redirect"
 
