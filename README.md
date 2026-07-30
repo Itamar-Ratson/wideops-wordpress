@@ -235,13 +235,13 @@ Expected: a floor of `2`, ceiling of `5`, CPU target of `0.6`, and a
 600-second initialization period. The group lists multiple zones and uses
 `wp-tcp-health` for healing with the same 600-second initial delay.
 
-The first boot installs Docker, GCS FUSE, and the Google Cloud Ops Agent,
-authenticates to Artifact Registry with a short-lived metadata-server token,
-mounts only the uploads prefix, writes a Terraform-rendered
-`/opt/wordpress/compose.yaml`, and brings it up. That file mirrors the local
-one: the Cloud SQL Auth Proxy takes MySQL's place as the service backing the
-shared Unix socket, while the host mount takes the place of the image's uploads
-directory. WordPress itself is unchanged. Check it through IAP:
+The first boot installs Docker and GCS FUSE, authenticates to Artifact Registry
+with a short-lived metadata-server token, mounts only the uploads prefix, writes
+a Terraform-rendered `/opt/wordpress/compose.yaml`, and brings it up. That file
+mirrors the local one: the Cloud SQL Auth Proxy takes MySQL's place as the
+service backing the shared Unix socket, while the host mount takes the place of
+the image's uploads directory. WordPress itself is unchanged. Check it through
+IAP:
 
 ```bash
 VM=$(gcloud compute instances list --project="${PROJECT_ID}" \
@@ -250,13 +250,13 @@ ZONE=$(gcloud compute instances list --project="${PROJECT_ID}" \
   --filter="name=${VM}" --format='value(zone.basename())' --limit=1)
 gcloud compute ssh "${VM}" --project="${PROJECT_ID}" --zone="${ZONE}" \
   --tunnel-through-iap \
-  --command='findmnt /mnt/wordpress-uploads; sudo tail -50 /var/log/wordpress-startup.log; sudo docker ps'
+  --command='findmnt /mnt/wordpress-uploads; sudo journalctl -u google-startup-scripts.service -n 50; sudo docker ps'
 ```
 
 Expected: the uploads path reports `fuse.gcsfuse`, and the `db` and `app`
-containers are running, with `app` healthy. The startup script is safe to run
-again: package installation converges, `mountpoint` skips an existing mount,
-and Compose reconciles the running containers against the same declared file.
+containers are running, with `app` healthy. On each boot, package installation
+converges, the bucket remounts after reboot, and Compose reconciles the running
+containers against the same declared file.
 
 ### 4. Seed and rewrite the managed database
 
@@ -533,25 +533,16 @@ single VM or zone loss leaves capacity for the load balancer while replacement
 occurs.
 
 The VM runs as `wordpress-vm`, not the project's default service account. It
-has exactly three project roles:
+has exactly two project roles:
 
 - `roles/cloudsql.client` lets the proxy authenticate the workload before it
   opens a private database tunnel.
 - `roles/artifactregistry.reader` lets Docker pull the published image.
-- `roles/logging.logWriter` lets the Ops Agent send logs.
 
 The broad `cloud-platform` OAuth scope does not add permissions; IAM still
-limits the identity to those three roles, plus the uploads bucket-scoped object
+limits the identity to those two roles, plus the uploads bucket-scoped object
 grant described above. No service-account key is created. The database,
 persistent disks, and buckets use Google-managed encryption at rest.
-
-Confirm startup logs have reached Cloud Logging:
-
-```bash
-gcloud logging read \
-  'resource.type="gce_instance" AND log_id("syslog")' \
-  --project="${PROJECT_ID}" --limit=10
-```
 
 ### Session management
 
@@ -596,8 +587,8 @@ so the key would never be possessed here.
 - **Keyless CI/CD:** use GitHub Actions with Workload Identity Federation for
   pull-request plans and merge-time applies; it is deferred because this
   assignment asks for an explicit, explainable manual deployment sequence.
-- **Pre-baked machine images:** install Docker, GCS FUSE, and the Ops Agent with
-  Packer to shorten scale-out by one to two minutes; startup remains scripted
+- **Pre-baked machine images:** install Docker and GCS FUSE with Packer to
+  shorten scale-out by one to two minutes; startup remains scripted
   here so every dependency is visible in one place.
 - **Object caching:** add Redis only when application demand justifies its cost;
   it needs a WordPress drop-in, adds roughly $36/month, and would suppress the

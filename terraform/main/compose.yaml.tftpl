@@ -34,10 +34,6 @@ services:
     depends_on:
       - db
     healthcheck:
-      # KNOWN WEAK — see docs/decisions.md §4. This returns 200 even when the
-      # proxy is stopped, because PHP writes a deprecation warning before any
-      # header and WordPress can no longer send its own 500. It currently proves
-      # only that Apache serves, not that the database is reachable.
       test:
         ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
       interval: 2s

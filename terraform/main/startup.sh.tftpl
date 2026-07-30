@@ -3,10 +3,6 @@
 # The base image supplies /etc/os-release; Terraform renders template variables.
 set -euo pipefail
 
-# Preserve the complete boot record in a file and syslog. The Ops Agent ships
-# syslog to Cloud Logging once it is installed below.
-exec > >(tee -a /var/log/wordpress-startup.log | logger --tag wordpress-startup) 2>&1
-
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg
@@ -22,21 +18,12 @@ printf 'deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cl
 apt-get update -qq
 apt-get install -y -qq gcsfuse
 
-# Installing the agent is idempotent: the repository script and apt converge
-# on the already-installed package when this startup script is run again.
-curl -fsSL -o /tmp/add-google-cloud-ops-agent-repo.sh \
-  https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
-bash /tmp/add-google-cloud-ops-agent-repo.sh --also-install
-systemctl enable --now google-cloud-ops-agent
-rm -f /tmp/add-google-cloud-ops-agent-repo.sh
-
 # Authenticate Docker with a short-lived token issued to this VM's service
 # account. This avoids assuming that gcloud is installed on the base image.
 TOKEN="$(curl -fsS \
   -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
   | sed -n 's/.*"access_token": *"\([^"]*\)".*/\1/p')"
-test -n "$TOKEN"
 printf '%s' "$TOKEN" | docker login \
   --username oauth2accesstoken \
   --password-stdin \
@@ -51,19 +38,16 @@ install -d -o 33 -g 33 -m 0755 /var/run/wordpress-mysqld
 # The bucket stores objects under the same wp-content/uploads prefix used by
 # public URLs, but only that prefix is exposed inside the container. Root owns
 # the FUSE process; uid/gid 33 present files as www-data, and allow_other lets
-# Apache cross FUSE's default mounting-user boundary. mountpoint makes this
-# safe to repeat without trying to mount over an existing mount.
+# Apache cross FUSE's default mounting-user boundary.
 install -d -m 0755 /mnt/wordpress-uploads
-if ! mountpoint --quiet /mnt/wordpress-uploads; then
-  gcsfuse \
-    --implicit-dirs \
-    --only-dir wp-content/uploads \
-    --uid 33 \
-    --gid 33 \
-    -o allow_other \
-    "${uploads_bucket_name}" \
-    /mnt/wordpress-uploads
-fi
+gcsfuse \
+  --implicit-dirs \
+  --only-dir wp-content/uploads \
+  --uid 33 \
+  --gid 33 \
+  -o allow_other \
+  "${uploads_bucket_name}" \
+  /mnt/wordpress-uploads
 
 install -d -m 0755 /opt/wordpress
 cat > /opt/wordpress/compose.yaml <<'COMPOSE'
@@ -71,6 +55,5 @@ ${compose_file}
 COMPOSE
 
 # Compose converges on the declared state, so re-running this script needs no
-# teardown step first. --wait blocks until the app healthcheck passes, which
-# proves WordPress reached the database rather than merely that a port is open.
+# teardown step first. --wait blocks until the app healthcheck passes.
 docker compose --file /opt/wordpress/compose.yaml up --detach --wait
