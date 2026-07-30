@@ -255,8 +255,8 @@ gcloud compute ssh "${VM}" --project="${PROJECT_ID}" --zone="${ZONE}" \
 
 Expected: the uploads path reports `fuse.gcsfuse`, and the `db` and `app`
 containers are running, with `app` healthy. On each boot, package installation
-converges, the bucket remounts after reboot, and Compose reconciles the running
-containers against the same declared file.
+converges, the bucket remounts, and Compose reconciles the running containers
+against the same declared file.
 
 ### 4. Seed and rewrite the managed database
 
@@ -454,7 +454,7 @@ the CDN-backed bucket and never consume VM, Apache, or PHP capacity.
   socket shared with the WordPress container, so the supplied
   `DB_HOST='localhost'` resolves the same way it does locally.
 - The VM boot disk contains only replaceable runtime files, container layers,
-  and logs. Central copies of system logs are sent to Cloud Logging.
+  and logs.
 - Terraform resource state is local in each stack and excluded from version
   control. The main stack reads only the bootstrap stack's non-secret project,
   region, and repository outputs.

@@ -9,7 +9,7 @@ apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg
 systemctl enable --now docker
 
 # GCS FUSE is installed from Google's signed apt repository. Rewriting the
-# source and key is safe when the startup script is run again.
+# source and key is safe to repeat on every boot.
 . /etc/os-release
 curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
   | gpg --dearmor --yes --output /usr/share/keyrings/cloud.google.gpg
@@ -54,6 +54,7 @@ cat > /opt/wordpress/compose.yaml <<'COMPOSE'
 ${compose_file}
 COMPOSE
 
-# Compose converges on the declared state, so re-running this script needs no
-# teardown step first. --wait blocks until the app healthcheck passes.
+# Compose converges on the declared state, so a boot that finds containers
+# already restarted needs no teardown step first. --wait blocks until the app
+# healthcheck passes.
 docker compose --file /opt/wordpress/compose.yaml up --detach --wait

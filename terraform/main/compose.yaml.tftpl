@@ -34,6 +34,8 @@ services:
     depends_on:
       - db
     healthcheck:
+      # Proves only that Apache serves. PHP emits warning output before
+      # WordPress can send its own 500, so a stopped proxy still returns 200.
       test:
         ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
       interval: 2s
