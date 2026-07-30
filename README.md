@@ -13,7 +13,6 @@ Before starting, install:
 - [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`)
 - [Terraform](https://developer.hashicorp.com/terraform/install) 1.5 or later
 - [Docker](https://docs.docker.com/engine/install/)
-- [`openssl`](https://www.openssl.org/)
 - A load-generation tool such as [`hey`](https://github.com/rakyll/hey) or
   ApacheBench (`ab`)
 
@@ -172,31 +171,7 @@ gcloud artifacts docker images list \
 
 Expected: one row whose `TAGS` column contains `v1`.
 
-### 3. Create and register the self-signed certificate
-
-```bash
-make certificate
-```
-
-The script generates the certificate and private key under the ignored
-`.certificates/` directory, then registers the public certificate with Compute
-Engine. Terraform only reads the registered certificate as a data source, so
-the private key never enters Terraform configuration or state. The repository's
-deny-all ignore policy and explicit `*.key`/certificate rules prevent the local
-key from being added to version control.
-
-The target is safe to repeat. It checks the project for `wp-self-signed` first
-and leaves both the registered resource and local files unchanged when it
-exists. Confirm the certificate is registered:
-
-```bash
-gcloud compute ssl-certificates describe wp-self-signed \
-  --project="${PROJECT_ID}" --global --format='value(name,type)'
-```
-
-Expected: `wp-self-signed SELF_MANAGED`.
-
-### 4. Provision the public application stack
+### 3. Provision the public application stack
 
 ```bash
 make infra
@@ -206,9 +181,11 @@ Allow about 15-20 minutes. Cloud SQL and its read replica are the slowest
 resources. The target creates the custom network, NAT gateway, private primary
 and replica databases, dedicated instance identity, private seed and public
 uploads buckets, regional instance group containing at least two `e2-medium`
-servers, and global load balancer with a CDN-enabled bucket backend. The main
-stack reads the project and region from the bootstrap stack's local outputs, so
-those values remain configured in one place.
+servers, and global load balancer with a CDN-enabled bucket backend and
+self-signed TLS certificate. Terraform generates the certificate and key as
+part of this apply. The main stack reads the project and region from the
+bootstrap stack's local outputs, so those values remain configured in one
+place.
 
 Confirm that the VM has an internal address and no external address:
 
@@ -279,7 +256,7 @@ containers are running, with `app` healthy. The startup script is safe to run
 again: package installation converges, `mountpoint` skips an existing mount,
 and Compose reconciles the running containers against the same declared file.
 
-### 5. Seed and rewrite the managed database
+### 4. Seed and rewrite the managed database
 
 ```bash
 make seed
@@ -361,7 +338,7 @@ Expected: the table returns to two `RUNNING` instances without intervention.
 The replacement's startup script rebuilds the whole runtime from the current
 template; no useful state was present on the deleted boot disk.
 
-### 6. Demonstrate autoscaling and availability
+### 5. Demonstrate autoscaling and availability
 
 Run the load demonstration after seeding, when the homepage executes real PHP
 and database work. Requests for its images bypass the VM through the bucket
@@ -414,7 +391,7 @@ If scale-out is not observed, even one load worker or availability sample
 fails, or the group does not return to two before the settle timeout, the target
 exits unsuccessfully.
 
-### 7. Tear down
+### 6. Tear down
 
 ```bash
 make destroy
@@ -422,10 +399,10 @@ make destroy
 
 This destroys the main stack, including the load balancer, VMs, NAT gateway,
 private peering, Cloud SQL primary and replica, and both buckets. The uploads
-bucket uses `force_destroy`, so its media is deleted with the stack. The
-registered certificate and the ignored local pair both remain, alongside the
-bootstrap APIs and image repository, so a later `make infra` rebuilds the stack
-without repeating any of the one-time foundation work.
+bucket uses `force_destroy`, so its media is deleted with the stack. The TLS
+certificate is removed with the stack. Only the bootstrap APIs and image
+repository remain, so a later `make infra` rebuilds the stack without repeating
+any of the one-time foundation work.
 
 Expect the private peering to need a second pass. Cloud SQL's tenant project
 keeps the `servicenetworking-googleapis-com` peering attached after the
@@ -445,18 +422,6 @@ Setting `deletion_policy = "ABANDON"` on the connection is not a fix. It skips
 the failing call, but Compute Engine then refuses to delete a network that
 still carries a peering, so the same run fails one resource later and leaves
 the peering behind silently.
-
-To remove the certificate as well, or to rotate it before its 365-day expiry,
-run this after `make destroy`:
-
-```bash
-scripts/delete-certificate.sh "${PROJECT_ID}"
-```
-
-It has to run with the stack down: Compute Engine refuses to delete a
-certificate while the HTTPS proxy still references it. Removing the local
-`.certificates/` pair too makes the next `make certificate` generate a fresh
-one instead of re-registering the old pair.
 
 ## Current architecture and request flow
 
@@ -570,8 +535,11 @@ load balancer's `X-Forwarded-Proto: https` header to Apache's `HTTPS=on`
 environment, allowing unmodified WordPress to issue secure URLs and cookies
 without entering a redirect loop. The certificate is self-signed and named for
 `wideops-wordpress.invalid`, so the browser warning when accessing the stable
-IP is expected. A production deployment would use a real domain and a
-Google-managed, publicly trusted certificate.
+load-balancer IP is expected. Terraform renews it 30 days before expiry;
+`name_prefix` and create-before-destroy let the proxy move to the replacement
+before the old certificate is removed. A production deployment would use a
+real domain and a Google-managed, publicly trusted certificate, so its private
+key would never exist on our side.
 
 The backend health check is TCP on port 80. It verifies that Apache accepts a
 connection without executing PHP or querying Cloud SQL, so a shared database
@@ -631,19 +599,23 @@ application. The compensating controls are a database with no public address
 and an IAM-authenticated proxy reached only from the private VM. Rotating the
 credential would be the first step in a real engagement.
 
-**Terraform state is local.** State files are excluded from version control.
-That is acceptable for this demo while the only credential in state is the
-already-supplied database password. [The decisions record](docs/decisions.md)
-describes the migration to a versioned, IAM-restricted Cloud Storage backend.
+**Terraform state is local and secret-bearing.** State files are excluded from
+version control and contain both the supplied database password and the
+generated self-signed TLS key. The key was previously an unencrypted, ignored
+file readable by the same user on the same machine, so moving it into ignored
+local state crosses no new trust boundary. It protects only a `.invalid` demo
+hostname trusted by nothing. A team deployment would move state to a versioned,
+IAM-restricted Cloud Storage backend. Secret Manager is not the production
+answer for the TLS key: a real domain would use a Google-managed certificate,
+so the key would never be possessed here.
 
 ## Deferred improvements
 
 - **Remote Terraform state:** move both stacks to versioned, IAM-restricted GCS
   backends before multiple operators collaborate; local state keeps this demo's
-  bootstrap linear and contains no certificate private key.
-- **Terraform-managed certificate and image build:** move both into the graph
-  after state is remote. Doing it now would place the TLS private key in a local
-  state file and add a second provider for an image whose source is fixed.
+  bootstrap linear.
+- **Terraform-managed image build:** moving it into the graph would add a second
+  provider for an image whose source is fixed.
 - **Keyless CI/CD:** use GitHub Actions with Workload Identity Federation for
   pull-request plans and merge-time applies; it is deferred because this
   assignment asks for an explicit, explainable manual deployment sequence.

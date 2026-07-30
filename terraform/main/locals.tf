@@ -17,6 +17,10 @@ locals {
   # CPU as visitor demand, so both wait the same period.
   instance_warmup_seconds = 600
 
+  # Reserved-invalid host: the load balancer is reached by IP, so no name would
+  # match and the browser warns regardless.
+  certificate_hostname = "wideops-wordpress.invalid"
+
   artifact_registry_host = "${local.region}-docker.pkg.dev"
   wordpress_image        = "${local.artifact_registry_host}/${local.project_id}/${local.repository_id}/wordpress:${var.image_tag}"
 }

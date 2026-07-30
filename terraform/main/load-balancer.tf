@@ -1,5 +1,34 @@
-data "google_compute_ssl_certificate" "wordpress" {
-  name = "wp-self-signed"
+resource "tls_private_key" "wordpress" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+# Valid for a year and reissued 30 days out, so a stack that is applied at
+# least monthly never serves an expired certificate.
+resource "tls_self_signed_cert" "wordpress" {
+  private_key_pem       = tls_private_key.wordpress.private_key_pem
+  validity_period_hours = 24 * 365
+  early_renewal_hours   = 24 * 30
+  dns_names             = [local.certificate_hostname]
+  allowed_uses          = ["digital_signature", "key_encipherment", "server_auth"]
+
+  subject {
+    common_name = local.certificate_hostname
+  }
+}
+
+# Compute Engine certificates are immutable, so renewal is a replacement. A
+# generated name plus create-before-destroy lets the HTTPS proxy move to the
+# new certificate first; Compute Engine refuses to delete one that a proxy
+# still references.
+resource "google_compute_ssl_certificate" "wordpress" {
+  name_prefix = "wp-self-signed-"
+  certificate = tls_self_signed_cert.wordpress.cert_pem
+  private_key = tls_private_key.wordpress.private_key_pem
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_compute_global_address" "wordpress" {
@@ -65,7 +94,7 @@ resource "google_compute_url_map" "wordpress" {
 
 resource "google_compute_target_https_proxy" "wordpress" {
   name             = "wp-https-proxy"
-  ssl_certificates = [data.google_compute_ssl_certificate.wordpress.id]
+  ssl_certificates = [google_compute_ssl_certificate.wordpress.id]
   url_map          = google_compute_url_map.wordpress.id
 }
 

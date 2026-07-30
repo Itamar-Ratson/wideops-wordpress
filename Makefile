@@ -1,4 +1,4 @@
-.PHONY: bootstrap image certificate infra seed load-test destroy local-check local-clean
+.PHONY: bootstrap image infra seed load-test destroy local-check local-clean
 
 # Recursively expanded on purpose: the seed recipe reads Terraform outputs, and
 # those must not be evaluated when an unrelated target runs.
@@ -18,10 +18,6 @@ image:
 	  --project=wideops-wordpress \
 	  --region=europe-north2 \
 	  --tag europe-north2-docker.pkg.dev/wideops-wordpress/wordpress/wordpress:v1
-
-certificate:
-	scripts/create-certificate.sh \
-	  $$($(TF_BOOTSTRAP) output -raw project_id)
 
 infra:
 	$(TF_MAIN) init
