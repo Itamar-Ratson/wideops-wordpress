@@ -1,2 +1,6 @@
 Dockerfile
 .dockerignore
+latest.tar.gz
+readme.html
+license.txt
+wp-content/uploads

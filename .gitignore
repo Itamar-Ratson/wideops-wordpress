@@ -6,7 +6,6 @@
 !.gitignore
 !README.md
 !Makefile
-!compose.yaml
 !assignment.txt
 !data/wordpress.sql
 !data/rewrite-urls.sql
@@ -14,6 +13,7 @@
 
 # Allow: directories
 !scripts/**
+!local/**
 
 # Allow: types
 !*.tf
