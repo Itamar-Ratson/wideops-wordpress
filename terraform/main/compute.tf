@@ -1,3 +1,4 @@
+# Boot image and rendered environment
 data "google_compute_image" "ubuntu" {
   family  = "ubuntu-2404-lts-amd64"
   project = "ubuntu-os-cloud"
@@ -11,6 +12,7 @@ locals {
   })
 }
 
+# Instance template
 resource "google_compute_instance_template" "wordpress" {
   name_prefix  = "wp-"
   machine_type = var.machine_type
@@ -37,7 +39,6 @@ resource "google_compute_instance_template" "wordpress" {
 
   network_interface {
     subnetwork = google_compute_subnetwork.wordpress.id
-    # Keep access_config out: it would give the instances public IPs.
   }
 
   service_account {
@@ -50,6 +51,7 @@ resource "google_compute_instance_template" "wordpress" {
   }
 }
 
+# Managed group and autoscaling
 resource "google_compute_region_instance_group_manager" "wordpress" {
   # The instance template references only the bucket's name, so Terraform cannot
   # infer these dependencies; removing either reintroduces a GCS FUSE race.

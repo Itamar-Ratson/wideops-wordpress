@@ -1,15 +1,7 @@
-# Adds only the pieces needed to run the shared application service locally.
-# Compose replaces single-valued fields from earlier files and appends list-valued
-# fields. Paths below are relative to the project directory established by the
-# first Compose file (the repository root), not to this override's directory.
-
 services:
   db:
     image: mysql:8.0
-    # No ports mapping: MySQL stays reachable only from the app container on the
-    # Compose network, so a MySQL already running on the host cannot collide.
     environment:
-      # These must match app/wp-config.php.
       MYSQL_DATABASE: wordpress
       MYSQL_USER: wordpress
       MYSQL_PASSWORD: Foxtrot01
@@ -18,10 +10,6 @@ services:
       - ./data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
       - ./data/rewrite-urls.sql:/docker-entrypoint-initdb.d/02-rewrite-urls.sql:ro
     healthcheck:
-      # The entrypoint imports the dump against a temporary server started with
-      # --skip-networking, and that server shares this container's socket. A
-      # loopback TCP check is therefore the signal that the import has finished,
-      # where a socket check would pass against the half-imported server.
       test:
         [
           "CMD-SHELL",

@@ -1,5 +1,5 @@
+# API list and build identity
 locals {
-  # APIs used by this stack and by the main infrastructure stack.
   apis = [
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
@@ -14,10 +14,10 @@ locals {
     "storage.googleapis.com",
   ]
 
-  # New projects use the Compute Engine default service account for Cloud Build.
   build_service_account = "${data.google_project.current.number}-compute@developer.gserviceaccount.com"
 }
 
+# API enablement
 resource "google_project_service" "enabled" {
   for_each = toset(local.apis)
 
@@ -33,6 +33,7 @@ data "google_project" "current" {
   depends_on = [google_project_service.enabled]
 }
 
+# Image repository
 resource "google_artifact_registry_repository" "wordpress" {
   project       = var.project_id
   location      = var.region
@@ -43,8 +44,7 @@ resource "google_artifact_registry_repository" "wordpress" {
   depends_on = [google_project_service.enabled]
 }
 
-# The build identity needs both permissions explicitly: one for the image and
-# one for its logs.
+# Cloud Build permissions
 resource "google_project_iam_member" "build_artifact_writer" {
   project = var.project_id
   role    = "roles/artifactregistry.writer"

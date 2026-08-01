@@ -11,7 +11,6 @@ printf 'Driving %s with %s workers for %ss.\n' "${URL}" "${WORKERS}" "${DURATION
 
 SECONDS=0
 for ((worker = 0; worker < WORKERS; worker++)); do
-    # $1 belongs to the timeout's shell.
     # shellcheck disable=SC2016
     timeout "${DURATION}" bash -c 'while :; do curl --insecure --silent --max-time 30 --output /dev/null "$1" || true; done' _ "${URL}" &
 done

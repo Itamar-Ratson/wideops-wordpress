@@ -1,3 +1,4 @@
+# Self-signed certificate
 resource "tls_private_key" "wordpress" {
   algorithm = "RSA"
   rsa_bits  = 2048
@@ -25,11 +26,12 @@ resource "google_compute_ssl_certificate" "wordpress" {
   }
 }
 
+# Shared public address
 resource "google_compute_global_address" "wordpress" {
   name = "wp-public-ip"
 }
 
-# Keep this TCP-only: probing PHP would turn a database outage into VM churn.
+# Backends
 resource "google_compute_health_check" "wordpress" {
   name                = "wp-tcp-health"
   check_interval_sec  = 5
@@ -61,6 +63,7 @@ resource "google_compute_backend_bucket" "uploads" {
   enable_cdn  = true
 }
 
+# HTTPS frontend
 resource "google_compute_url_map" "wordpress" {
   name            = "wp-url-map"
   default_service = google_compute_backend_service.wordpress.id
@@ -95,6 +98,7 @@ resource "google_compute_global_forwarding_rule" "https" {
   target                = google_compute_target_https_proxy.wordpress.id
 }
 
+# Port-80 redirect frontend
 resource "google_compute_url_map" "http_redirect" {
   name = "wp-http-redirect"
 
