@@ -3,6 +3,14 @@ data "google_compute_image" "ubuntu" {
   project = "ubuntu-os-cloud"
 }
 
+locals {
+  wordpress_environment = templatefile("${path.module}/wordpress.env.tftpl", {
+    database_host   = google_sql_database_instance.wordpress.private_ip_address
+    site_url        = local.wordpress_url
+    wordpress_image = local.wordpress_image
+  })
+}
+
 resource "google_compute_instance_template" "wordpress" {
   name_prefix  = "wp-"
   machine_type = var.machine_type
@@ -14,13 +22,9 @@ resource "google_compute_instance_template" "wordpress" {
 
   metadata_startup_script = templatefile("${path.module}/startup.sh.tftpl", {
     artifact_registry_host = local.artifact_registry_host
+    compose_file           = file("${path.module}/../../compose.yaml")
+    environment_file       = local.wordpress_environment
     uploads_bucket_name    = google_storage_bucket.uploads.name
-
-    compose_file = templatefile("${path.module}/compose.yaml.tftpl", {
-      database_host   = google_sql_database_instance.wordpress.private_ip_address
-      site_url        = local.wordpress_url
-      wordpress_image = local.wordpress_image
-    })
   })
 
   disk {

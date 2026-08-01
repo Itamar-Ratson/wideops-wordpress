@@ -39,5 +39,9 @@ install -d -m 0755 /opt/wordpress
 cat > /opt/wordpress/compose.yaml <<'COMPOSE'
 ${compose_file}
 COMPOSE
+cat > /opt/wordpress/.env <<'COMPOSE_ENV'
+${environment_file}
+COMPOSE_ENV
 
-docker compose --file /opt/wordpress/compose.yaml up --detach --wait
+cd /opt/wordpress
+docker compose --file compose.yaml up --detach --wait
