@@ -6,11 +6,15 @@ services:
   app:
     image: "${WORDPRESS_IMAGE}"
     environment:
+      # DB_HOST is the name wp-config.php reads. The Compose-level name differs so
+      # an exported DB_HOST in an operator's shell cannot shadow the .env value.
       DB_HOST: "${DATABASE_HOST}"
       SITE_URL: "${SITE_URL}"
     ports:
       - "80:80"
     volumes:
+      # Whole mount spec, because only the target is fixed: both environments mount
+      # onto /var/www/html/wp-content/uploads, but local adds :ro and production does not.
       - "${UPLOADS_MOUNT}"
     healthcheck:
       test:

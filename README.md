@@ -43,6 +43,19 @@ Skip project creation if it already exists. Project IDs are global; change a dif
 Run `make local-check`, open <http://localhost>, and follow [`local/checklist.md`](local/checklist.md).
 It builds the real image without GCP. Run `make local-clean` afterward; each check starts with a fresh database.
 
+### Local and production differences
+
+Both environments run the application service in the root `compose.yaml`. Local adds `local/compose.yaml`; production
+uses no override. They differ as follows:
+
+| Concern | Local verification | Production |
+| --- | --- | --- |
+| Image | Builds `app/` and tags it locally | Pulls the tagged Artifact Registry image |
+| Database | Adds MySQL and waits for it to become healthy | Uses the Cloud SQL primary's private address |
+| Site address | Uses `http://localhost` | Uses the load balancer's HTTPS address |
+| Uploads | Bind-mounts the supplied tree read-only | Mounts the GCS FUSE path read-write |
+| Values | Reads the committed `local/.env` | Reads `/opt/wordpress/.env`, rendered by Terraform and left on each VM for inspection |
+
 ## Deploy
 
 The two stacks encode the order: APIs and repository, then image, then the instance group.
@@ -184,8 +197,8 @@ to the database. A 600-second warmup protects slow boot and excludes boot CPU; a
 Code is immutable in `wordpress:v1`; VM disks are replaceable. The backed-up private Cloud SQL primary streams to
 a read replica reserved for reporting, while WordPress uses only the primary.
 
-WordPress dials the primary's private IP directly, with `DB_HOST` injected per environment. A private assets bucket
-supplies seed data.
+WordPress dials the primary's private IP directly. The shared Compose definition reads `DB_HOST` and its other varying
+values from the environment file supplied by each environment. A private assets bucket supplies seed data.
 GCS FUSE mounts a separate uploads bucket over WordPress's upload path; public reads bypass PHP through Cloud CDN.
 
 The VM identity has bucket-scoped `roles/storage.objectUser`. Public `roles/storage.objectViewer` also permits
@@ -204,13 +217,14 @@ sticky sessions nor a server-local session store is required.
 
 ### Changes to the supplied files
 
-The supplied WordPress configuration now reads the database host and the site address from the environment with
-`getenv()`: the host is the database service name during local verification and the Cloud SQL private address after
-deployment, and the site address sets both WordPress address constants. `getenv()` rather than the `$_ENV` superglobal
-because Apache's PHP configuration can omit environment variables from it depending on `variables_order`; it is also
-the official WordPress image's pattern. A third constant requests the TLS that Cloud SQL requires. The supplied
-database name, user, and password are unchanged, as is the dump; the only other change was untracking the redundant
-site archive shipped alongside the extracted tree.
+The supplied WordPress configuration now reads the database host and the site address from the Compose environment
+with `getenv()`: the committed local environment file names the database service and localhost, while Terraform renders
+the Cloud SQL private address and load balancer address into the environment file on each VM. The site address sets both
+WordPress address constants. `getenv()` is used rather than the `$_ENV` superglobal because Apache's PHP configuration
+can omit environment variables from it depending on `variables_order`; it is also the official WordPress image's
+pattern. A third constant requests the TLS that Cloud SQL requires. The supplied database name, user, and password are
+unchanged, as is the dump; the only other change was untracking the redundant site archive shipped alongside the
+extracted tree.
 
 The address constants override the two address rows in the dump but cannot fix addresses written literally inside post
 content, so a separate static migration strips the old host from the post content and guid columns after import,

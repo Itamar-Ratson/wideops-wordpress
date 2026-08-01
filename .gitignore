@@ -1,46 +1,35 @@
-# Ignore everything, then whitelist the deliverable.
+# Ignore everything, then allow only deliverable directories and file types.
 *
 !*/
 
-# Allow: files
-!.gitignore
-!README.md
-!Makefile
-!compose.yaml
-!assignment.txt
-!data/wordpress.sql
-!data/rewrite-urls.sql
-!.terraform.lock.hcl
-
-# Allow: directories
-!scripts/**
-!local/**
-
-# Allow: types
+# Allow safe file types.
+!/*.md
+!/local/*.md
+!*.hcl
+!*.sh
+!*.sql
 !*.tf
 !*.tftpl
+!*.yaml
 
-# Deny: files
+# Allow files without a safely generalizable type.
+!/.gitignore
+!/Makefile
+!/assignment.txt
+!/local/.env
+
+# Exclude Terraform overrides and working directories after allowing Terraform types.
 override.tf*
 *_override.tf*
-
-# Deny: directories
 **/.terraform/
 
-# Deny: types
-*.pem
-*.key
-*.crt
-*.csr
-
-# Order-sensitive tail: each rule outranks everything above it.
-
-# The supplied WordPress tree, unmodified.
+# Include the supplied WordPress tree.
 !app/**
-# ...except the source archive; the extracted tree is canonical.
+
+# Exclude its source archive; the extracted tree is canonical.
 app/latest.tar.gz
-# ...and never private keys. WordPress ships wp-includes/certificates/ca-bundle.crt,
-# so *.crt stays allowed above; these three never legitimately appear under app/.
+
+# Exclude private key material. WordPress legitimately includes a CA certificate.
 app/**/*.pem
 app/**/*.key
 app/**/*.csr
