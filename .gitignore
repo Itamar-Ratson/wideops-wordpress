@@ -6,6 +6,7 @@
 !.gitignore
 !README.md
 !Makefile
+!compose.yaml
 !assignment.txt
 !data/wordpress.sql
 !data/rewrite-urls.sql
