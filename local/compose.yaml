@@ -1,6 +1,7 @@
-# Brings the migrated site up locally so it can be checked by hand.
-# See checklist.md for what to look at once it is running.
-name: wideops-wordpress-local
+# Adds only the pieces needed to run the shared application service locally.
+# Compose replaces single-valued fields from earlier files and appends list-valued
+# fields. Paths below are relative to the project directory established by the
+# first Compose file (the repository root), not to this override's directory.
 
 services:
   db:
@@ -14,8 +15,8 @@ services:
       MYSQL_PASSWORD: Foxtrot01
       MYSQL_ROOT_PASSWORD: Foxtrot01
     volumes:
-      - ../data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
-      - ../data/rewrite-urls.sql:/docker-entrypoint-initdb.d/02-rewrite-urls.sql:ro
+      - ./data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
+      - ./data/rewrite-urls.sql:/docker-entrypoint-initdb.d/02-rewrite-urls.sql:ro
     healthcheck:
       # The entrypoint imports the dump against a temporary server started with
       # --skip-networking, and that server shares this container's socket. A
@@ -31,21 +32,7 @@ services:
       retries: 45
 
   app:
-    build: ../app
-    image: wideops-wordpress:local
-    environment:
-      DB_HOST: db
-      SITE_URL: http://localhost
-    ports:
-      - "80:80"
-    volumes:
-      - ../app/wp-content/uploads:/var/www/html/wp-content/uploads:ro
+    build: ./app
     depends_on:
       db:
         condition: service_healthy
-    healthcheck:
-      test:
-        ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
-      interval: 2s
-      timeout: 5s
-      retries: 45

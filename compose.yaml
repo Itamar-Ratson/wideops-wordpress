@@ -1,0 +1,21 @@
+# Defines the application service shared by local verification and production.
+# Environment-specific values are resolved by Docker Compose at run time.
+name: wideops-wordpress
+
+services:
+  app:
+    image: "${WORDPRESS_IMAGE}"
+    environment:
+      DB_HOST: "${DATABASE_HOST}"
+      SITE_URL: "${SITE_URL}"
+    ports:
+      - "80:80"
+    volumes:
+      - "${UPLOADS_MOUNT}"
+    healthcheck:
+      test:
+        ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+    restart: unless-stopped

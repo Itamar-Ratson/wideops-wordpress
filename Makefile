@@ -27,8 +27,8 @@ validate:
 	terraform -chdir=terraform/main validate
 
 local-check: local-clean
-	docker compose --file local/compose.yaml up --build --wait
+	docker compose --env-file local/.env --file compose.yaml --file local/compose.yaml up --build --wait
 	@printf '\nThe migrated site is running at http://localhost\nCheck it against local/checklist.md, then run: make local-clean\n'
 
 local-clean:
-	docker compose --file local/compose.yaml down --volumes --remove-orphans
+	docker compose --env-file local/.env --file compose.yaml --file local/compose.yaml down --volumes --remove-orphans
