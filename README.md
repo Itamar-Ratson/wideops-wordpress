@@ -46,7 +46,7 @@ It builds the real image without GCP. Run `make local-clean` afterward; each che
 ### Local and production differences
 
 Both environments run the application service in the root `compose.yaml`. Local adds `local/compose.yaml`; production
-uses no override. Their complete differences are:
+uses no override. They differ as follows:
 
 | Concern | Local verification | Production |
 | --- | --- | --- |

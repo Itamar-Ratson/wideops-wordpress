@@ -43,5 +43,4 @@ cat > /opt/wordpress/.env <<'COMPOSE_ENV'
 ${environment_file}
 COMPOSE_ENV
 
-cd /opt/wordpress
-docker compose --file compose.yaml up --detach --wait
+docker compose --file /opt/wordpress/compose.yaml up --detach --wait
