@@ -3,7 +3,7 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg
+apt-get install -y -qq ca-certificates curl docker.io docker-compose-v2 gnupg jq
 systemctl enable --now docker
 
 . /etc/os-release
@@ -17,7 +17,7 @@ apt-get install -y -qq gcsfuse
 TOKEN="$(curl -fsS \
   -H 'Metadata-Flavor: Google' \
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
-  | sed -n 's/.*"access_token": *"\([^"]*\)".*/\1/p')"
+  | jq -er '.access_token')"
 printf '%s' "$TOKEN" | docker login \
   --username oauth2accesstoken \
   --password-stdin \
