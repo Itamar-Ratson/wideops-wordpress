@@ -1,3 +1,4 @@
+# Primary
 resource "google_sql_database_instance" "wordpress" {
   name             = "wp-primary"
   database_version = "MYSQL_8_0"
@@ -19,13 +20,12 @@ resource "google_sql_database_instance" "wordpress" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.wordpress.id
-      # WordPress talks to the private IP directly, so the instance itself has
-      # to reject cleartext; nothing else terminates TLS on that path.
-      ssl_mode = "ENCRYPTED_ONLY"
+      ssl_mode        = "ENCRYPTED_ONLY"
     }
   }
 }
 
+# Read replica
 resource "google_sql_database_instance" "wordpress_replica" {
   name                 = "wp-replica"
   database_version     = "MYSQL_8_0"
@@ -46,6 +46,7 @@ resource "google_sql_database_instance" "wordpress_replica" {
   }
 }
 
+# Schema and user
 resource "google_sql_database" "wordpress" {
   name      = "wordpress"
   charset   = "utf8mb4"

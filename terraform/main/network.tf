@@ -1,3 +1,4 @@
+# Google source ranges
 data "google_netblock_ip_ranges" "health_checkers" {
   range_type = "health-checkers"
 }
@@ -6,6 +7,7 @@ data "google_netblock_ip_ranges" "iap" {
   range_type = "iap-forwarders"
 }
 
+# VPC and subnet
 resource "google_compute_network" "wordpress" {
   name                    = "wp-vpc"
   auto_create_subnetworks = false
@@ -19,6 +21,7 @@ resource "google_compute_subnetwork" "wordpress" {
   region                   = local.region
 }
 
+# Outbound internet through NAT
 resource "google_compute_router" "wordpress" {
   name    = "wp-router"
   network = google_compute_network.wordpress.id
@@ -33,6 +36,7 @@ resource "google_compute_router_nat" "wordpress" {
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
 
+# Ingress firewall
 resource "google_compute_firewall" "allow_load_balancer" {
   name    = "wp-allow-lb"
   network = google_compute_network.wordpress.name
@@ -59,6 +63,7 @@ resource "google_compute_firewall" "allow_iap_ssh" {
   target_tags   = ["wordpress"]
 }
 
+# Private peering for Cloud SQL
 resource "google_compute_global_address" "cloud_sql" {
   name          = "wp-sql-private-range"
   address_type  = "INTERNAL"

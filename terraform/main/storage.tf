@@ -1,4 +1,4 @@
-# Keep public access enforced: this bucket contains the database seed.
+# Private bucket for seed data
 resource "google_storage_bucket" "assets" {
   name                        = "${local.project_id}-assets"
   location                    = local.region
@@ -26,7 +26,7 @@ resource "google_storage_bucket_iam_member" "sql_import_reader" {
   member = "serviceAccount:${google_sql_database_instance.wordpress.service_account_email_address}"
 }
 
-# Keep public access inherited: the load balancer reads uploads anonymously.
+# Public bucket for uploads
 resource "google_storage_bucket" "uploads" {
   name                        = "${local.project_id}-uploads"
   location                    = local.region
