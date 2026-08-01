@@ -15,6 +15,11 @@ gcloud auth application-default login
 
 Run the remaining commands from the repository root.
 
+## Validate Terraform
+
+Run `make validate` to initialise and validate both Terraform stacks. The check does not access Terraform state,
+cloud credentials, or provisioned infrastructure, so it can run before deployment and in a clean checkout.
+
 ## Create the project
 
 The defaults are `wideops-wordpress` and `europe-north2` in `terraform/bootstrap/variables.tf`. To retarget,
