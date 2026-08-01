@@ -80,8 +80,9 @@ its private IP.
 make seed
 ```
 
-Run once on a fresh database. It syncs uploads to their browser paths, then imports the dump and public-URL rewrite
-through the Cloud SQL control plane. No bastion or database network path is needed. Allow time for backend health.
+Run once on a fresh database. It syncs uploads to their browser paths, then imports the dump and the static post URL
+rewrite through the Cloud SQL control plane. The rewrite strips the source host so rendered post URLs stay relative.
+No bastion or database network path is needed. Allow time for backend health.
 
 ### Verify the deployed requirements
 

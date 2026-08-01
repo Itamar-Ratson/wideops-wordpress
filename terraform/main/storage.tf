@@ -14,6 +14,12 @@ resource "google_storage_bucket_object" "database_dump" {
   source = "${path.module}/../../data/wordpress.sql"
 }
 
+resource "google_storage_bucket_object" "url_rewrite" {
+  name   = "seed/rewrite-urls.sql"
+  bucket = google_storage_bucket.assets.name
+  source = "${path.module}/../../data/rewrite-urls.sql"
+}
+
 resource "google_storage_bucket_iam_member" "sql_import_reader" {
   bucket = google_storage_bucket.assets.name
   role   = "roles/storage.objectViewer"
