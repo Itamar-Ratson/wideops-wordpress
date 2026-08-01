@@ -24,8 +24,6 @@ printf '%s' "$TOKEN" | docker login \
   "https://${artifact_registry_host}"
 unset TOKEN
 
-install -d -o 33 -g 33 -m 0755 /var/run/wordpress-mysqld
-
 install -d -m 0755 /mnt/wordpress-uploads
 # Keep allow_other: Apache cannot cross GCS FUSE mounting-user boundary without it.
 gcsfuse \

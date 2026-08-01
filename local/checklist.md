@@ -5,7 +5,7 @@ Everything here is about the migration itself.
 
 | # | Check | What a pass tells you |
 |---|-------|-----------------------|
-| 1 | The home page loads at all, with no PHP error and no "Error establishing a database connection" | The image builds on PHP 7.4, `mysqli` loaded, and the hardcoded `DB_HOST` of `localhost` reached the database over the MySQL socket |
+| 1 | The home page loads at all, with no PHP error and no "Error establishing a database connection" | The image builds on PHP 7.4, `mysqli` loaded, and the injected `DB_HOST` reached the database over TLS-encrypted TCP |
 | 2 | The site title reads **Photography Guy** | The dump imported and `wp_options` was rewritten |
 | 3 | The post **Romanian Autumn** shows its text | `wp_posts` content survived the import and rewrite |
 | 4 | The post's photo displays rather than showing a broken image | The external media mount and `wp_postmeta` attachment paths both resolve |

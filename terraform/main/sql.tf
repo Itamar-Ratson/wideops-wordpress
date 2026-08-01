@@ -19,6 +19,9 @@ resource "google_sql_database_instance" "wordpress" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.wordpress.id
+      # WordPress talks to the private IP directly, so the instance itself has
+      # to reject cleartext; nothing else terminates TLS on that path.
+      ssl_mode = "ENCRYPTED_ONLY"
     }
   }
 }
@@ -38,6 +41,7 @@ resource "google_sql_database_instance" "wordpress_replica" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = google_compute_network.wordpress.id
+      ssl_mode        = "ENCRYPTED_ONLY"
     }
   }
 }

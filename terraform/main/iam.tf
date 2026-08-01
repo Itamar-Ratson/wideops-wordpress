@@ -6,7 +6,6 @@ resource "google_service_account" "wordpress" {
 resource "google_project_iam_member" "wordpress" {
   for_each = toset([
     "roles/artifactregistry.reader",
-    "roles/cloudsql.client",
   ])
 
   project = local.project_id
