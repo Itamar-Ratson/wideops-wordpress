@@ -1,4 +1,4 @@
-.PHONY: bootstrap image infra seed load-test destroy local-check local-clean
+.PHONY: bootstrap image infra seed load-test destroy validate local-check local-clean
 
 bootstrap:
 	terraform -chdir=terraform/bootstrap init
@@ -19,6 +19,12 @@ load-test:
 
 destroy:
 	terraform -chdir=terraform/main destroy
+
+validate:
+	terraform -chdir=terraform/bootstrap init -backend=false -input=false
+	terraform -chdir=terraform/bootstrap validate
+	terraform -chdir=terraform/main init -backend=false -input=false
+	terraform -chdir=terraform/main validate
 
 local-check: local-clean
 	docker compose --file local/compose.yaml up --build --wait
