@@ -11,6 +11,6 @@ set -Eeuo pipefail
 readonly REWRITE_SQL=/opt/rewrite-urls.sql
 
 {
-    printf "SET @destination = '%s';\n" "${LOCAL_URL}"
+    printf "SET @destination = '%s';\n" "${SITE_URL}"
     cat "${REWRITE_SQL}"
 } | MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql --user=root "${MYSQL_DATABASE}"

@@ -18,6 +18,7 @@ resource "google_compute_instance_template" "wordpress" {
 
     compose_file = templatefile("${path.module}/compose.yaml.tftpl", {
       database_host   = google_sql_database_instance.wordpress.private_ip_address
+      site_url        = local.wordpress_url
       wordpress_image = local.wordpress_image
     })
   })

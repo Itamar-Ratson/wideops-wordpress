@@ -13,7 +13,9 @@ services:
       MYSQL_USER: wordpress
       MYSQL_PASSWORD: Foxtrot01
       MYSQL_ROOT_PASSWORD: Foxtrot01
-      LOCAL_URL: http://localhost
+      # The rewrite destination baked into the database; must match the app
+      # service's SITE_URL, which is the address WordPress then serves.
+      SITE_URL: http://localhost
     volumes:
       - ../data/wordpress.sql:/docker-entrypoint-initdb.d/01-import-dump.sql:ro
       - ./rewrite-urls.sh:/docker-entrypoint-initdb.d/02-rewrite-urls.sh:ro
@@ -37,6 +39,7 @@ services:
     image: wideops-wordpress:local
     environment:
       DB_HOST: db
+      SITE_URL: http://localhost
     ports:
       - "80:80"
     volumes:

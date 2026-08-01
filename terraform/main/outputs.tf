@@ -35,5 +35,5 @@ output "uploads_uri" {
 
 output "wordpress_url" {
   description = "Public HTTPS URL of the migrated WordPress site."
-  value       = "https://${google_compute_global_address.wordpress.address}"
+  value       = local.wordpress_url
 }

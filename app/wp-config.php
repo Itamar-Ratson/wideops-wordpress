@@ -40,6 +40,18 @@ if ($db_host === false || $db_host === '') {
 }
 define('DB_HOST', $db_host);
 
+/**
+ * WordPress address, injected per environment: localhost for local verification,
+ * the reserved load balancer address on GCP. Both constants override the site
+ * address rows imported from the supplied database dump.
+ */
+$site_url = getenv('SITE_URL');
+if ($site_url === false || $site_url === '') {
+	exit('SITE_URL is not set.');
+}
+define('WP_HOME', $site_url);
+define('WP_SITEURL', $site_url);
+
 /** Cloud SQL rejects cleartext; MySQL 8 negotiates TLS locally without setup. */
 define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
 
