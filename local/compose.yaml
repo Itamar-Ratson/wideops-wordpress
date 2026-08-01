@@ -37,6 +37,7 @@ services:
     image: wideops-wordpress:local
     environment:
       DB_HOST: db
+      SITE_URL: http://localhost
     ports:
       - "80:80"
     volumes:

@@ -19,4 +19,5 @@ locals {
 
   artifact_registry_host = "${local.region}-docker.pkg.dev"
   wordpress_image        = "${local.artifact_registry_host}/${local.project_id}/${local.repository_id}/wordpress:${var.image_tag}"
+  wordpress_url          = "https://${google_compute_global_address.wordpress.address}"
 }
