@@ -1,27 +1,14 @@
 name: wideops-wordpress
 
 services:
-  db:
-    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-    # The distroless proxy defaults to uid 65532; run it as www-data so Apache
-    # can use the Unix socket it creates.
-    user: "33:33"
-    command:
-      - "--private-ip"
-      - "${sql_connection_name}?unix-socket-path=/var/run/mysqld/mysqld.sock"
-    volumes:
-      - /var/run/wordpress-mysqld:/var/run/mysqld
-    restart: unless-stopped
-
   app:
     image: ${wordpress_image}
+    environment:
+      DB_HOST: "${database_host}"
     ports:
       - "80:80"
     volumes:
-      - /var/run/wordpress-mysqld:/var/run/mysqld
       - /mnt/wordpress-uploads:/var/www/html/wp-content/uploads
-    depends_on:
-      - db
     healthcheck:
       test:
         ["CMD", "curl", "--fail", "--silent", "--output", "/dev/null", "http://localhost/"]

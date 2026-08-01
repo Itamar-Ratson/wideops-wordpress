@@ -15,7 +15,4 @@ RUN printf '%s\n' 'SetEnvIf X-Forwarded-Proto "^https$" HTTPS=on' \
         > /etc/apache2/conf-available/forwarded-https.conf \
     && a2enconf forwarded-https
 
-RUN printf '%s\n' 'mysqli.default_socket=/var/run/mysqld/mysqld.sock' \
-        > /usr/local/etc/php/conf.d/mysqli-socket.ini
-
 COPY . /var/www/html/

@@ -29,8 +29,19 @@ define('DB_USER', 'wordpress');
 /** MySQL database password */
 define('DB_PASSWORD', 'Foxtrot01');
 
-/** MySQL hostname */
-define('DB_HOST', 'localhost');
+/**
+ * MySQL hostname, injected per environment: the Compose service name locally,
+ * the Cloud SQL private IP on GCP. Fail loudly rather than let an unset value
+ * become an empty host, which mysqli silently retries as a local socket.
+ */
+$db_host = getenv('DB_HOST');
+if ($db_host === false || $db_host === '') {
+	exit('DB_HOST is not set.');
+}
+define('DB_HOST', $db_host);
+
+/** Cloud SQL rejects cleartext; MySQL 8 negotiates TLS locally without setup. */
+define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
 
 /** Database Charset to use in creating database tables. */
 define('DB_CHARSET', 'utf8mb4');

@@ -17,8 +17,8 @@ resource "google_compute_instance_template" "wordpress" {
     uploads_bucket_name    = google_storage_bucket.uploads.name
 
     compose_file = templatefile("${path.module}/compose.yaml.tftpl", {
-      sql_connection_name = google_sql_database_instance.wordpress.connection_name
-      wordpress_image     = local.wordpress_image
+      database_host   = google_sql_database_instance.wordpress.private_ip_address
+      wordpress_image = local.wordpress_image
     })
   })
 

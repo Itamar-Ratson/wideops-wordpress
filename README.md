@@ -71,7 +71,8 @@ make infra
 ```
 
 Allow 15–20 minutes for private databases, network, buckets, the 2–5-instance regional group, load balancer, and
-Terraform-generated certificate. Each VM installs Docker/GCS FUSE and starts WordPress with the Cloud SQL Auth Proxy.
+Terraform-generated certificate. Each VM installs Docker/GCS FUSE and starts WordPress, which reaches Cloud SQL over
+its private IP.
 
 ### 4. Seed the site
 
@@ -164,12 +165,9 @@ application URL map
   |                        v
   |                    regional MIG: 2-5 VMs across zones, no public IP
   |                        |
-  |                        +-- WordPress -- Unix socket --> SQL proxy
-  |                                                       |
-  |                                                       v private path
-  |                                                  Cloud SQL MySQL 8 primary
-  |                                                       |
-  |                                                       +--> read replica
+  |                        +-- WordPress -- private IP, TLS --> Cloud SQL MySQL 8 primary
+  |                                                                  |
+  |                                                                  +--> read replica
   |
   +-- /wp-content/uploads/* --> Cloud CDN --> public uploads bucket
 
@@ -185,7 +183,8 @@ to the database. A 600-second warmup protects slow boot and excludes boot CPU; a
 Code is immutable in `wordpress:v1`; VM disks are replaceable. The backed-up private Cloud SQL primary streams to
 a read replica reserved for reporting, while WordPress uses only the primary.
 
-The Auth Proxy exposes a Unix socket, preserving `DB_HOST='localhost'`. A private assets bucket supplies seed data.
+WordPress dials the primary's private IP directly, with `DB_HOST` injected per environment. A private assets bucket
+supplies seed data.
 GCS FUSE mounts a separate uploads bucket over WordPress's upload path; public reads bypass PHP through Cloud CDN.
 
 The VM identity has bucket-scoped `roles/storage.objectUser`. Public `roles/storage.objectViewer` also permits
@@ -205,13 +204,15 @@ The custom VPC has one subnet. VMs use Cloud NAT, not external IPs; Private Goog
 SQL is private. Port 80 accepts only Google's published proxy/health ranges; SSH is IAP-only with OS Login. The public
 port-80 map contains only an HTTPS redirect, with no content backend.
 
-The VM identity has only `cloudsql.client` and `artifactregistry.reader` at project scope, plus its bucket grant.
+The VM identity has only `artifactregistry.reader` at project scope, plus its bucket grant.
 No key exists. TLS terminates at the balancer; forwarded HTTPS makes unmodified WordPress emit secure URLs and cookies.
 
 ## Known limitations
 
 - The certificate is self-signed for `.invalid`, so browsers warn; production needs a domain and managed certificate.
-- `Foxtrot01` is fixed in supplied `wp-config.php` and state; private SQL plus its IAM proxy are compensating controls.
+- `Foxtrot01` is fixed in supplied `wp-config.php` and state; private-IP-only SQL and `ENCRYPTED_ONLY` are the
+  compensating controls. WordPress 4.9.4 never calls `mysqli_ssl_set()`, so the connection is encrypted but the
+  server certificate is unverified: that stops passive capture on the VPC, not an active MITM already inside it.
 - Local state fits only this single-operator demo; team use needs the remote backend above.
 - `make seed` is intentionally a one-time operation for a fresh database.
 - VM boot installs packages and takes minutes; production could use a pre-baked image.
