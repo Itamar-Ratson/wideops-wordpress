@@ -32,5 +32,9 @@ override.tf*
 *.crt
 *.csr
 
-# Supplied WordPress tree, unmodified. Last: outranks *.crt above.
+# Order-sensitive tail: each rule outranks everything above it.
+
+# The supplied WordPress tree, unmodified.
 !app/**
+# ...except the source archive; the extracted tree is canonical.
+app/latest.tar.gz
