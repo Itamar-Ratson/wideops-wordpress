@@ -74,33 +74,15 @@ gcloud sql instances describe wp-replica --project="${PROJECT_ID}" \
 
 Run `make load-test` to send concurrent traffic for ten minutes and watch the MIG scale from 2 to 5 instances.
 
-## Architecture and request flow
+## Architecture
 
 ```text
-Public client
-  | HTTP :80
-  +----------------> redirect URL map -- 301 --> HTTPS
-  |
-  | HTTPS :443 (self-signed TLS)
-  v
-global external Application Load Balancer
-  |
-  v
-application URL map
-  |
-  +-- all other paths --> WordPress backend service
-  |                        | TCP health check on :80
-  |                        v
-  |                    regional MIG: 2-5 VMs across zones, no public IP
-  |                        |
-  |                        +-- WordPress -- private IP, TLS --> Cloud SQL MySQL 8 primary
-  |                                                                  |
-  |                                                                  +--> read replica
-  |
-  +-- /wp-content/uploads/* --> Cloud CDN --> public uploads bucket
+                           +--> WordPress MIG (2-5 private VMs) --> Cloud SQL primary --> read replica
+Client --> global HTTPS LB |
+                           +--> /wp-content/uploads/* --> Cloud CDN --> uploads bucket
 
-Operator -- SSH through Identity-Aware Proxy --> regional MIG
-VM outbound package/image traffic ------------> Cloud NAT
+VM outbound traffic --> Cloud NAT
+Operator SSH traffic --> Identity-Aware Proxy
 ```
 
 - **State and storage:** The immutable `wordpress:v1` image makes VM disks replaceable. WordPress writes to the private
