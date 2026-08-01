@@ -34,3 +34,6 @@ override.tf*
 
 # Supplied WordPress tree, unmodified. Last: outranks *.crt above.
 !app/**
+
+# Archive used to supply the WordPress tree; the extracted tree is canonical.
+app/latest.tar.gz
