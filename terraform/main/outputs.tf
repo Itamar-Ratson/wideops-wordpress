@@ -1,8 +1,3 @@
-output "assets_uri" {
-  description = "Cloud Storage URI of the private bucket that make seed stages the rewrite in."
-  value       = "gs://${google_storage_bucket.assets.name}"
-}
-
 output "database_dump_uri" {
   description = "Cloud Storage URI of the supplied dump that make seed imports."
   value       = "gs://${google_storage_bucket.assets.name}/${google_storage_bucket_object.database_dump.name}"
@@ -31,6 +26,11 @@ output "sql_instance_name" {
 output "uploads_uri" {
   description = "Cloud Storage URI whose prefix matches the public WordPress uploads path."
   value       = "gs://${google_storage_bucket.uploads.name}/wp-content/uploads"
+}
+
+output "url_rewrite_uri" {
+  description = "Cloud Storage URI of the static post URL rewrite imported by make seed."
+  value       = "gs://${google_storage_bucket.assets.name}/${google_storage_bucket_object.url_rewrite.name}"
 }
 
 output "wordpress_url" {
