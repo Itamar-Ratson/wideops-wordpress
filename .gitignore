@@ -38,3 +38,8 @@ override.tf*
 !app/**
 # ...except the source archive; the extracted tree is canonical.
 app/latest.tar.gz
+# ...and never private keys. WordPress ships wp-includes/certificates/ca-bundle.crt,
+# so *.crt stays allowed above; these three never legitimately appear under app/.
+app/**/*.pem
+app/**/*.key
+app/**/*.csr
