@@ -1,6 +1,6 @@
 # Highly Available WordPress on GCP
 
-This repository packages the supplied WordPress 4.9.4 site unchanged and runs it on a private regional managed
+This repository packages the supplied WordPress 4.9.4 site and runs it on a private regional managed
 instance group behind a global HTTPS load balancer. Cloud SQL stores data; Cloud Storage and Cloud CDN share media.
 
 ## Prerequisites
@@ -196,14 +196,38 @@ TLS key. The first team change would be versioned, IAM-restricted Cloud Storage 
 
 ### Sessions
 
-No sticky sessions are configured. The supplied code makes no PHP session calls; fixed `wp-config.php` salts sign
-WordPress cookies identically on every VM. Any instance can validate a login, while affinity would conceal local state.
+WordPress does not keep login state in per-instance PHP sessions. It gives the browser an authentication cookie signed
+with the fixed keys and salts supplied with the site, while the corresponding user token metadata lives in the shared
+database. Those keys and salts ship in the image, so every ephemeral instance signs and validates cookies identically.
+A logged-in user therefore remains logged in when the load balancer sends a later request to another instance; neither
+sticky sessions nor a server-local session store is required.
+
+### Changes to the supplied files
+
+The supplied WordPress configuration now reads the database host and the site address from the environment with
+`getenv()`: the host is the database service name during local verification and the Cloud SQL private address after
+deployment, and the site address sets both WordPress address constants. `getenv()` rather than the `$_ENV` superglobal
+because Apache's PHP configuration can omit environment variables from it depending on `variables_order`; it is also
+the official WordPress image's pattern. A third constant requests the TLS that Cloud SQL requires. The supplied
+database name, user, and password are unchanged, as is the dump; the only other change was untracking the redundant
+site archive shipped alongside the extracted tree.
+
+The address constants override the two address rows in the dump but cannot fix addresses written literally inside post
+content, so a separate static migration strips the old host from the post content and guid columns after import,
+producing root-relative URLs without coupling the data to a new host. It leaves the options table alone: some rows hold
+PHP-serialized plugin data whose byte-length prefixes a blind replace would invalidate. Guids are rewritten despite the
+usual advice against changing them after publication, because the earlier move to `104.155.81.48` already changed them,
+there are no feed subscribers whose deduplication state could be disturbed, and keeping them would leak that address in
+feed output.
 
 ### Networking and security
 
 The custom VPC has one subnet. VMs use Cloud NAT, not external IPs; Private Google Access carries API traffic. Cloud
 SQL is private. Port 80 accepts only Google's published proxy/health ranges; SSH is IAP-only with OS Login. The public
-port-80 map contains only an HTTPS redirect, with no content backend.
+port-80 map contains only an HTTPS redirect, with no content backend. No Cloud SQL Auth Proxy runs on the VMs;
+WordPress connects straight to the private address over TLS, so the network design rather than proxy IAM keeps the
+database unexposed: it has no public address, is reachable only through VPC peering from this subnet, and still
+requires credentials.
 
 The VM identity has only `artifactregistry.reader` at project scope, plus its bucket grant.
 No key exists. TLS terminates at the balancer; forwarded HTTPS makes unmodified WordPress emit secure URLs and cookies.
